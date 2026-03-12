@@ -1,0 +1,45 @@
+  正在确定要还原的项目…
+  所有项目均是最新的，无法还原。
+/Users/karmy/Projects/CardGame/tractor/src/Core/Models/Card.cs(48,30): warning CS8765: 参数“obj”类型的为 Null 性与重写成员不匹配(可能是由于为 Null 性特性)。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/Models/Card.cs(42,21): warning CS8767: “bool Card.Equals(Card other)”的参数“other”类型中引用类型的为 Null 性与隐式实现的成员“bool IEquatable<Card>.Equals(Card? other)”不匹配(可能是由于为 Null 性特性)。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/Models/CardComparer.cs(17,20): warning CS8767: “int CardComparer.Compare(Card x, Card y)”的参数“x”类型中引用类型的为 Null 性与隐式实现的成员“int IComparer<Card>.Compare(Card? x, Card? y)”不匹配(可能是由于为 Null 性特性)。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/Models/CardComparer.cs(17,20): warning CS8767: “int CardComparer.Compare(Card x, Card y)”的参数“y”类型中引用类型的为 Null 性与隐式实现的成员“int IComparer<Card>.Compare(Card? x, Card? y)”不匹配(可能是由于为 Null 性特性)。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/Rules/ThrowValidator.cs(108,24): warning CS8603: 可能返回 null 引用。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/LevelManager.cs(74,23): warning CS8618: 在退出构造函数时，不可为 null 的 属性 "Winner" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 属性 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/LevelManager.cs(78,23): warning CS8618: 在退出构造函数时，不可为 null 的 属性 "NextDealer" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 属性 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/Models/Card.cs(48,59): warning CS8604: “bool Card.Equals(Card other)”中的形参“other”可能传入 null 引用实参。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/Game.cs(28,16): warning CS8618: 在退出构造函数时，不可为 null 的 字段 "_dealing" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 字段 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/Game.cs(28,16): warning CS8618: 在退出构造函数时，不可为 null 的 字段 "_bidding" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 字段 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/Game.cs(28,16): warning CS8618: 在退出构造函数时，不可为 null 的 字段 "_burying" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 字段 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/Deck.cs(16,16): warning CS8618: 在退出构造函数时，不可为 null 的 字段 "_cards" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 字段 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+/Users/karmy/Projects/CardGame/tractor/src/Core/GameFlow/Deck.cs(22,16): warning CS8618: 在退出构造函数时，不可为 null 的 字段 "_cards" 必须包含非 null 值。请考虑添加 "required" 修饰符或将该 字段 声明为可为 null。 [/Users/karmy/Projects/CardGame/tractor/TractorGame.csproj]
+  TractorGame -> /Users/karmy/Projects/CardGame/tractor/bin/Debug/net6.0/TractorGame.dll
+/Users/karmy/Projects/CardGame/tractor/bin/Debug/net6.0/TractorGame.dll (.NETCoreApp,Version=v6.0)的测试运行
+VSTest 版本 17.11.1 (arm64)
+
+正在启动测试执行，请稍候...
+总共 1 个测试文件与指定模式相匹配。
+/Users/karmy/Projects/CardGame/tractor/bin/Debug/net6.0/TractorGame.dll
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.4.5+1caef2f33e (64-bit .NET 6.0.8)
+[xUnit.net 00:00:00.28]   Discovering: TractorGame
+[xUnit.net 00:00:00.30]   Discovered:  TractorGame
+[xUnit.net 00:00:00.30]   Starting:    TractorGame
+[xUnit.net 00:00:00.34]     TractorGame.Tests.GameSimulationTests.FullGame_WithAI_CompletesSuccessfully [FAIL]
+[xUnit.net 00:00:00.34]       Assert.True() Failure
+[xUnit.net 00:00:00.34]       Expected: True
+[xUnit.net 00:00:00.34]       Actual:   False
+[xUnit.net 00:00:00.34]       Stack Trace:
+[xUnit.net 00:00:00.34]         /Users/karmy/Projects/CardGame/tractor/tests/GameSimulationTests.cs(57,0): at TractorGame.Tests.GameSimulationTests.FullGame_WithAI_CompletesSuccessfully()
+[xUnit.net 00:00:00.35]   Finished:    TractorGame
+  失败 TractorGame.Tests.GameSimulationTests.FullGame_WithAI_CompletesSuccessfully [4 ms]
+  错误消息:
+   Assert.True() Failure
+Expected: True
+Actual:   False
+  堆栈跟踪:
+     at TractorGame.Tests.GameSimulationTests.FullGame_WithAI_CompletesSuccessfully() in /Users/karmy/Projects/CardGame/tractor/tests/GameSimulationTests.cs:line 57
+
+测试运行失败。
+测试总数: 1
+     失败数: 1
+总时间: 1.0667 秒

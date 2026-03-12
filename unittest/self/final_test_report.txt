@@ -1,0 +1,55 @@
+  正在确定要还原的项目…
+  所有项目均是最新的，无法还原。
+  TractorGame -> /Users/karmy/Projects/CardGame/tractor/bin/Debug/net6.0/TractorGame.dll
+/Users/karmy/Projects/CardGame/tractor/bin/Debug/net6.0/TractorGame.dll (.NETCoreApp,Version=v6.0)的测试运行
+VSTest 版本 17.11.1 (arm64)
+
+正在启动测试执行，请稍候...
+总共 1 个测试文件与指定模式相匹配。
+/Users/karmy/Projects/CardGame/tractor/bin/Debug/net6.0/TractorGame.dll
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.4.5+1caef2f33e (64-bit .NET 6.0.8)
+[xUnit.net 00:00:00.25]   Discovering: TractorGame
+[xUnit.net 00:00:00.27]   Discovered:  TractorGame
+[xUnit.net 00:00:00.27]   Starting:    TractorGame
+  已通过 TractorGame.Tests.GameSimulationTests.FullGame_Setup_CompletesSuccessfully [3 ms]
+  已通过 TractorGame.Tests.GameTests.BuryBottom_Valid_Success [3 ms]
+  已通过 TractorGame.Tests.DeckTests.Deck_Initialize_Has108Cards [2 ms]
+  已通过 TractorGame.Tests.BottomBuryingTests.BuryCards_NotInHand_Fails [2 ms]
+  已通过 TractorGame.Tests.TrumpBiddingTests.SelfProtect_SetsMaxLevel [2 ms]
+  已通过 TractorGame.Tests.LevelManagerTests.DetermineLevelChange_DefenderScore85_DefenderUp1 [3 ms]
+  已通过 TractorGame.Tests.AIPlayerTests.Lead_ReturnsOneCard [2 ms]
+  已通过 TractorGame.Tests.DealingPhaseTests.Deal_Gives8BottomCards [2 ms]
+  已通过 TractorGame.Tests.LevelManagerTests.DetermineLevelChange_DefenderScore165_DefenderUp3 [< 1 ms]
+  已通过 TractorGame.Tests.LevelManagerTests.DetermineLevelChange_DefenderScore125_DefenderUp2 [< 1 ms]
+  已通过 TractorGame.Tests.BottomBuryingTests.BuryCards_Wrong_Count_Fails [< 1 ms]
+  已通过 TractorGame.Tests.LevelManagerTests.DetermineLevelChange_DefenderScore0_DealerUp3 [< 1 ms]
+  已通过 TractorGame.Tests.BottomBuryingTests.BuryCards_Valid8Cards_Success [< 1 ms]
+  已通过 TractorGame.Tests.LevelManagerTests.DetermineLevelChange_DefenderScore50_DealerUp2 [< 1 ms]
+  已通过 TractorGame.Tests.GameTests.StartGame_InitializesCorrectly [< 1 ms]
+  已通过 TractorGame.Tests.TrumpBiddingTests.TryBid_CounterBid_HigherLevel_Success [< 1 ms]
+  已通过 TractorGame.Tests.TrumpBiddingTests.TryBid_CounterBid_SameLevel_Fails [< 1 ms]
+  已通过 TractorGame.Tests.GameTests.FinalizeTrump_SetsTrumpSuit [< 1 ms]
+  已通过 TractorGame.Tests.TrumpBiddingTests.TryBid_SingleLevelCard_Success [< 1 ms]
+  已通过 TractorGame.Tests.DealingPhaseTests.Deal_AllCardsDistributed [< 1 ms]
+  已通过 TractorGame.Tests.TrumpBiddingTests.TryBid_PairLevelCard_Success [< 1 ms]
+  已通过 TractorGame.Tests.TrumpBiddingTests.TryBid_NonLevelCard_Fails [< 1 ms]
+  已通过 TractorGame.Tests.DealingPhaseTests.Deal_GivesEachPlayer25Cards [< 1 ms]
+  已通过 TractorGame.Tests.AIPlayerTests.BuryBottom_Returns8Cards [< 1 ms]
+  已通过 TractorGame.Tests.GameTests.BidTrump_ValidBid_Success [< 1 ms]
+  已通过 TractorGame.Tests.GameTests.PlayCards_WrongPlayer_Fails [< 1 ms]
+  已通过 TractorGame.Tests.GameTests.PlayCards_ValidPlay_Success [< 1 ms]
+  已通过 TractorGame.Tests.AIPlayerTests.Follow_ReturnsSameSuit [1 ms]
+  已通过 TractorGame.Tests.ScoreCalculatorTests.CalculateBottomScore_Pair_QuadruplesScore [< 1 ms]
+[xUnit.net 00:00:00.33]   Finished:    TractorGame
+  已通过 TractorGame.Tests.ScoreCalculatorTests.CalculateBottomScore_AllScoreCards_MaximumScore [< 1 ms]
+  已通过 TractorGame.Tests.DeckTests.Deck_Shuffle_DifferentSeeds [3 ms]
+  已通过 TractorGame.Tests.DeckTests.Deck_DrawCard_ReducesCount [< 1 ms]
+  已通过 TractorGame.Tests.ScoreCalculatorTests.CalculateBottomScore_ThreeConsecutivePairs_MultipliesByEight [2 ms]
+  已通过 TractorGame.Tests.ScoreCalculatorTests.CalculateBottomScore_SingleCard_DoublesScore [< 1 ms]
+  已通过 TractorGame.Tests.ScoreCalculatorTests.CalculateBottomScore_TwoConsecutivePairs_MultipliesByFour [< 1 ms]
+  已通过 TractorGame.Tests.ScoreCalculatorTests.CalculateBottomScore_NoScoreCards_ReturnsZero [< 1 ms]
+
+测试运行成功。
+测试总数: 36
+     通过数: 36
+总时间: 1.0335 秒

@@ -1,0 +1,27 @@
+# Build outputs
+bin/
+obj/
+
+# OS files
+.DS_Store
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test results
+TestResults/
+
+# NuGet
+*.nupkg
+
+# VS Code
+.vscode/
+
+# Rider
+.idea/
+
+# Logs
+*.log
