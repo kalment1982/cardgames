@@ -36,8 +36,10 @@ namespace TractorGame.Core.Models
         private int CompareTrump(Card x, Card y)
         {
             // 大王 > 小王
+            if (x.Rank == Rank.BigJoker && y.Rank == Rank.BigJoker) return 0;
             if (x.Rank == Rank.BigJoker) return 1;
             if (y.Rank == Rank.BigJoker) return -1;
+            if (x.Rank == Rank.SmallJoker && y.Rank == Rank.SmallJoker) return 0;
             if (x.Rank == Rank.SmallJoker) return 1;
             if (y.Rank == Rank.SmallJoker) return -1;
 
