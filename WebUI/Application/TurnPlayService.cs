@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using TractorGame.Core.GameFlow;
+using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
 
@@ -39,7 +40,8 @@ public sealed class TurnPlayService
             });
         }
 
-        bool success = game.PlayCards(playerIndex, cards);
+        var playResult = game.PlayCardsEx(playerIndex, cards);
+        bool success = playResult.Success;
 
         if (!success)
         {
@@ -56,7 +58,8 @@ public sealed class TurnPlayService
                 trickPosition,
                 cards = serializeCards(cards),
                 phase = game.State.Phase.ToString(),
-                currentPlayer = game.State.CurrentPlayer
+                currentPlayer = game.State.CurrentPlayer,
+                reasonCode = playResult.ReasonCode ?? ReasonCodes.UnknownError
             });
             return false;
         }

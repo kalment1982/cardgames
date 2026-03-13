@@ -610,6 +610,61 @@ async function readState(page) {
   });
 }
 
+async function readLastEvent(page) {
+  return page.evaluate(() => window.tractorTest?.getLastEvent?.() ?? null);
+}
+
+async function recoverHumanSelection(page, rejectEvent) {
+  if (!rejectEvent) {
+    return false;
+  }
+
+  return page.evaluate((rej) => {
+    const testApi = window.tractorTest;
+    const events = testApi?.getEvents?.() ?? [];
+    const trickIndex = Number(rej.trickIndex ?? 0);
+
+    const leadPlay = events.find((e) => e.type === 'play'
+      && Number(e.trickIndex) === trickIndex
+      && Number(e.trickPosition) === 1);
+
+    const need = Math.max(
+      1,
+      Number(leadPlay?.cards?.length ?? 0) || Number(rej.cards?.length ?? 0) || 1,
+    );
+    const leadSuit = leadPlay?.cards?.[0]?.suit ?? null;
+
+    const handCards = Array.from(document.querySelectorAll('[data-testid="hand-card"]'));
+    if (handCards.length === 0) {
+      return false;
+    }
+
+    for (const card of handCards) {
+      if (card.classList.contains('selected')) {
+        card.click();
+      }
+    }
+
+    const sameSuit = [];
+    const otherSuit = [];
+    for (const card of handCards) {
+      const key = card.getAttribute('data-card-key') ?? '';
+      if (leadSuit && key.startsWith(`${leadSuit}-`)) {
+        sameSuit.push(card);
+      } else {
+        otherSuit.push(card);
+      }
+    }
+
+    const picked = [...sameSuit, ...otherSuit].slice(0, Math.min(need, handCards.length));
+    for (const card of picked) {
+      card.click();
+    }
+
+    return picked.length > 0;
+  }, rejectEvent);
+}
+
 async function playOneGame(page, baseUrl, seed, timeoutMs, screenshotDir) {
   const gameUrl = `${baseUrl}/game?autotest=1&seed=${seed}`;
   await page.goto(gameUrl, { waitUntil: 'networkidle' });
@@ -617,6 +672,8 @@ async function playOneGame(page, baseUrl, seed, timeoutMs, screenshotDir) {
 
   const started = Date.now();
   let loops = 0;
+  let rejectStreak = 0;
+  let rejectKey = '';
 
   while (Date.now() - started < timeoutMs) {
     loops += 1;
@@ -657,7 +714,30 @@ async function playOneGame(page, baseUrl, seed, timeoutMs, screenshotDir) {
 
     if (state.phase === 'Playing') {
       if (state.currentPlayer === 0) {
-        await triggerTestButton(page, '[data-testid="btn-test-auto-select"]');
+        const lastEvent = await readLastEvent(page);
+        if (lastEvent?.type === 'play_rejected' && lastEvent?.actor === 'human') {
+          const key = `${lastEvent.trickIndex}:${lastEvent.trickPosition}:${lastEvent.reasonCode ?? ''}:${JSON.stringify(lastEvent.cards ?? [])}`;
+          if (key === rejectKey) {
+            rejectStreak += 1;
+          } else {
+            rejectKey = key;
+            rejectStreak = 1;
+          }
+        } else if (lastEvent?.type === 'play' && lastEvent?.actor === 'human') {
+          rejectStreak = 0;
+          rejectKey = '';
+        }
+
+        if (rejectStreak >= 3) {
+          const recovered = await recoverHumanSelection(page, lastEvent);
+          if (!recovered) {
+            await triggerTestButton(page, '[data-testid="btn-test-auto-select"]');
+          }
+          rejectStreak = 0;
+        } else {
+          await triggerTestButton(page, '[data-testid="btn-test-auto-select"]');
+        }
+
         const playBtn = page.locator('[data-testid="btn-play"]');
         const enabled = await playBtn.isEnabled().catch(() => false);
         if (enabled) {
