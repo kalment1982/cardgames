@@ -2,6 +2,7 @@
 @using System
 @using System.Collections.Generic
 @using System.Linq
+@using System.Threading
 @using TractorGame.Core.Models
 @using TractorGame.Core.GameFlow
 @using TractorGame.Core.AI
@@ -18,6 +19,27 @@
 @inject UiTestActionService UiTestActionService
 @inject TurnPlayService TurnPlayService
 
+@if (!IsAccessGranted)
+{
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f3d2e 0%,#116149 100%);color:#fff;padding:20px;">
+        <div style="width:min(420px,95vw);background:rgba(0,0,0,0.28);border:1px solid rgba(255,255,255,0.35);border-radius:14px;padding:20px;">
+            <h2 style="margin:0 0 8px 0;">游戏访问保护</h2>
+            <p style="margin:0 0 14px 0;opacity:.9;">请输入访问口令后进入游戏。</p>
+            <input @bind="AccessInput" @bind:event="oninput" type="password" placeholder="访问口令"
+                   style="width:100%;padding:12px 10px;border-radius:8px;border:1px solid #ddd;margin-bottom:10px;" />
+            <button @onclick="UnlockGame"
+                    style="width:100%;padding:12px 10px;border:none;border-radius:8px;background:#0ea5a4;color:white;font-weight:700;cursor:pointer;">
+                进入游戏
+            </button>
+            @if (!string.IsNullOrWhiteSpace(AccessError))
+            {
+                <div style="margin-top:10px;color:#fecaca;">@AccessError</div>
+            }
+        </div>
+    </div>
+}
+else
+{
 <div class="game-container">
     <!-- 左上角信息栏 -->
     <div class="info-panel">
@@ -120,6 +142,10 @@
             <button class="btn btn-view" data-testid="btn-view-bottom" @onclick="ViewBottom">查看底牌</button>
         }
         <button class="btn btn-history" data-testid="btn-history" @onclick="ViewLastTrick">上一轮牌</button>
+        @if (game?.State.Phase == GamePhase.Finished && ShowNextRoundButton)
+        {
+            <button class="btn btn-play" data-testid="btn-next-round" @onclick="StartNextRoundNow">下一局</button>
+        }
     </div>
 
     @if (IsUiTestMode)
@@ -146,6 +172,7 @@
         <div class="message-toast" data-testid="message-toast">@MessageService.CurrentMessage</div>
     }
 </div>
+}
 
 @code {
     // 游戏状态
@@ -160,13 +187,25 @@
     private int CurrentSeed;
     private int _trickNumber = 0;
     private int _actionCounter = 0;
+    private int _campaignDealerIndex = 0;
+    private Rank _campaignLevelRank = Rank.Two;
+    private readonly LevelManager _levelManager = new();
+    private bool ShowNextRoundButton = false;
+    private bool _roundTransitioning = false;
+    private CancellationTokenSource? _roundTransitionCts;
+    private bool IsAccessGranted = false;
+    private string AccessInput = string.Empty;
+    private string AccessError = string.Empty;
+    private string AccessCode = "tractor80";
 
     protected override void OnInitialized()
     {
         MessageService.Changed += OnMessageChanged;
         MessageService.Clear();
         ParseAutomationOptions();
-        StartNewGame();
+        ParseAccessOptions();
+        if (IsAccessGranted)
+            StartNewGame();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -178,6 +217,8 @@
     public void Dispose()
     {
         MessageService.Changed -= OnMessageChanged;
+        _roundTransitionCts?.Cancel();
+        _roundTransitionCts?.Dispose();
     }
 
     private void OnMessageChanged()
@@ -192,9 +233,64 @@
         ForcedSeed = AutomationService.ForcedSeed;
     }
 
+    private void ParseAccessOptions()
+    {
+        if (IsUiTestMode)
+        {
+            IsAccessGranted = true;
+            return;
+        }
+
+        var query = ParseQuery(new Uri(Navigation.Uri).Query);
+        if (query.TryGetValue("pass", out var pass) &&
+            !string.IsNullOrWhiteSpace(pass) &&
+            string.Equals(pass, AccessCode, StringComparison.Ordinal))
+        {
+            IsAccessGranted = true;
+        }
+    }
+
+    private void UnlockGame()
+    {
+        if (!string.Equals(AccessInput?.Trim(), AccessCode, StringComparison.Ordinal))
+        {
+            AccessError = "口令错误，请重试。";
+            return;
+        }
+
+        AccessError = string.Empty;
+        IsAccessGranted = true;
+        if (game == null)
+            StartNewGame();
+    }
+
+    private static Dictionary<string, string> ParseQuery(string query)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(query))
+            return dict;
+
+        var text = query.StartsWith("?") ? query[1..] : query;
+        foreach (var part in text.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split('=', 2);
+            var key = Uri.UnescapeDataString(kv[0]);
+            var value = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+            dict[key] = value;
+        }
+
+        return dict;
+    }
+
     private void StartNewGame()
     {
-        var session = GameSessionService.StartNewGame(ForcedSeed);
+        _roundTransitionCts?.Cancel();
+        _roundTransitionCts?.Dispose();
+        _roundTransitionCts = null;
+        ShowNextRoundButton = false;
+        _roundTransitioning = false;
+
+        var session = GameSessionService.StartNewGame(ForcedSeed, _campaignDealerIndex, _campaignLevelRank);
         game = session.Game;
         CurrentSeed = session.Seed;
         _trickNumber = 0;
@@ -378,6 +474,12 @@
         Vm.SelectedCardIndices.Clear();
         UpdateUI();
 
+        if (game.State.Phase == GamePhase.Finished)
+        {
+            await HandleGameFinishedAsync();
+            return;
+        }
+
         // 如果是AI的回合，自动出牌
         if (game.State.CurrentPlayer != 0 && game.State.Phase == GamePhase.Playing)
         {
@@ -405,7 +507,61 @@
 
         // 检查游戏是否结束
         if (game.State.Phase == GamePhase.Finished)
-            ShowMessage($"游戏结束！闲家得分：{game.State.DefenderScore}");
+            await HandleGameFinishedAsync();
+    }
+
+    private async Task HandleGameFinishedAsync()
+    {
+        if (game == null || game.State.Phase != GamePhase.Finished || _roundTransitioning)
+            return;
+
+        _roundTransitioning = true;
+        ShowNextRoundButton = true;
+
+        var result = _levelManager.DetermineLevelChange(game.State.DefenderScore, _campaignLevelRank);
+        int nextDealer = result.Winner == "闲家"
+            ? (_campaignDealerIndex + 1) % 4
+            : _campaignDealerIndex;
+
+        _campaignDealerIndex = nextDealer;
+        _campaignLevelRank = result.NextLevel;
+
+        ShowMessage($"本局结束！闲家得分：{game.State.DefenderScore}。下一局庄家：玩家{_campaignDealerIndex}，打{(int)_campaignLevelRank}。");
+        await InvokeAsync(StateHasChanged);
+
+        if (IsUiTestMode)
+        {
+            _roundTransitioning = false;
+            return;
+        }
+
+        _roundTransitionCts?.Cancel();
+        _roundTransitionCts?.Dispose();
+        _roundTransitionCts = new CancellationTokenSource();
+        var token = _roundTransitionCts.Token;
+
+        try
+        {
+            await Task.Delay(2000, token);
+            if (token.IsCancellationRequested)
+                return;
+
+            StartNewGame();
+        }
+        catch (TaskCanceledException)
+        {
+            // ignore
+        }
+        finally
+        {
+            _roundTransitioning = false;
+        }
+    }
+
+    private Task StartNextRoundNow()
+    {
+        StartNewGame();
+        return Task.CompletedTask;
     }
 
     private async Task BuryCards()

@@ -10,10 +10,12 @@ namespace WebUI.Application;
 
 public sealed class GameSessionService
 {
-    public (Game Game, int Seed) StartNewGame(int? forcedSeed)
+    public (Game Game, int Seed) StartNewGame(int? forcedSeed, int dealerIndex = 0, Rank levelRank = Rank.Two)
     {
         int seed = forcedSeed ?? DateTime.Now.Millisecond;
         var game = new Game(seed);
+        game.State.DealerIndex = ((dealerIndex % 4) + 4) % 4;
+        game.State.LevelRank = levelRank;
         game.StartGame();
         return (game, seed);
     }
@@ -110,4 +112,3 @@ public sealed class GameSessionService
         playerHand.AddRange(sortedNonTrump);
     }
 }
-
