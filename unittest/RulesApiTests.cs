@@ -139,26 +139,51 @@ namespace TractorGame.Tests
         }
 
         [Fact]
-        public void IsThrowSuccessful_ReturnsFalse_WhenFollowerHasPair()
+        public void IsThrowSuccessful_ReturnsFalse_WhenFollowerHasHigherPair()
         {
             var validator = new ThrowValidator(_config);
             var throwCards = new List<Card>
             {
-                new Card(Suit.Spade, Rank.Ace),
-                new Card(Suit.Spade, Rank.Ace),
+                new Card(Suit.Spade, Rank.Ten),
+                new Card(Suit.Spade, Rank.Ten),
                 new Card(Suit.Spade, Rank.King)
             };
             var followPlays = new List<List<Card>>
             {
                 new List<Card>
                 {
-                    new Card(Suit.Spade, Rank.Two),
-                    new Card(Suit.Spade, Rank.Two),
-                    new Card(Suit.Spade, Rank.Three)
+                    new Card(Suit.Spade, Rank.Jack),
+                    new Card(Suit.Spade, Rank.Jack),
+                    new Card(Suit.Spade, Rank.Nine)
                 }
             };
 
             Assert.False(validator.IsThrowSuccessful(throwCards, followPlays));
+        }
+
+        [Fact]
+        public void IsThrowSuccessful_ReturnsTrue_WhenFollowerPairIsLower()
+        {
+            var validator = new ThrowValidator(_config);
+            var throwCards = new List<Card>
+            {
+                new Card(Suit.Spade, Rank.Ace),
+                new Card(Suit.Spade, Rank.Ace),
+                new Card(Suit.Spade, Rank.King),
+                new Card(Suit.Spade, Rank.Queen)
+            };
+            var followPlays = new List<List<Card>>
+            {
+                new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.King),
+                    new Card(Suit.Spade, Rank.King),
+                    new Card(Suit.Spade, Rank.Jack),
+                    new Card(Suit.Spade, Rank.Ten)
+                }
+            };
+
+            Assert.True(validator.IsThrowSuccessful(throwCards, followPlays));
         }
 
         [Fact]

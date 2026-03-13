@@ -23,13 +23,25 @@ namespace TractorGame.Core.Rules
         {
             if (throwCards == null || throwCards.Count == 0)
                 return false;
+            if (!IsSameSuitOrTrump(throwCards))
+                return false;
+
+            if (followPlays == null || followPlays.Count == 0)
+                return true;
 
             var throwSuit = GetSuitOrCategory(throwCards[0]);
 
             // 检查所有跟牌
             foreach (var follow in followPlays)
             {
-                if (CanBeatThrow(follow, throwCards, throwSuit))
+                if (follow == null || follow.Count == 0)
+                    continue;
+
+                var sameSuitCards = follow.Where(c => GetSuitOrCategory(c) == throwSuit).ToList();
+                if (sameSuitCards.Count == 0)
+                    continue;
+
+                if (CanBeatThrow(sameSuitCards, throwCards))
                     return false;
             }
 
@@ -37,59 +49,294 @@ namespace TractorGame.Core.Rules
         }
 
         /// <summary>
-        /// 检查跟牌是否能管上甩牌
+        /// 检查同花手牌是否能在任一子结构上拦截甩牌
         /// </summary>
-        private bool CanBeatThrow(List<Card> follow, List<Card> throwCards, string throwSuit)
+        public bool CanBeatThrow(List<Card> sameSuitCards, List<Card> throwCards)
         {
-            var followSuit = GetSuitOrCategory(follow[0]);
-
-            // 不是同花色，无法管上
-            if (followSuit != throwSuit)
+            if (sameSuitCards == null || sameSuitCards.Count == 0)
+                return false;
+            if (throwCards == null || throwCards.Count == 0)
+                return false;
+            if (!IsSameSuitOrTrump(throwCards))
                 return false;
 
-            // 比较最大牌型结构
-            return HasBetterPattern(follow, throwCards);
+            var throwComponents = DecomposeThrowComponents(throwCards);
+            return throwComponents.Any(component => CanBeatComponent(sameSuitCards, component));
         }
 
         /// <summary>
-        /// 检查是否有更好的牌型结构
+        /// 将甩牌按规则拆解：拖拉机优先 -> 对子 -> 单牌
         /// </summary>
-        private bool HasBetterPattern(List<Card> follow, List<Card> throwCards)
+        public List<List<Card>> DecomposeThrow(List<Card> throwCards)
         {
-            var throwPattern = AnalyzePattern(throwCards);
-            var followPattern = AnalyzePattern(follow);
-
-            // 只要跟牌方有对应或更高的牌型结构，就算管上
-            if (followPattern.HasTractor && throwPattern.HasTractor)
-                return true;
-            if (followPattern.PairCount > 0 && throwPattern.PairCount > 0)
-                return true;
-
-            return false;
+            return DecomposeThrowComponents(throwCards).Select(component => component.Cards).ToList();
         }
 
-        private PatternAnalysis AnalyzePattern(List<Card> cards)
+        /// <summary>
+        /// 甩牌失败后的回退出牌：
+        /// 单牌 > 对子 > 拖拉机，且在选中牌型内出最小牌（或最小组合）
+        /// </summary>
+        public List<Card> GetFallbackPlay(List<Card> cards)
         {
-            var analysis = new PatternAnalysis();
-            var pattern = new CardPattern(cards, _config);
+            if (cards == null || cards.Count == 0)
+                return new List<Card>();
+            if (!IsSameSuitOrTrump(cards))
+                return new List<Card>();
 
-            if (pattern.Type == PatternType.Tractor)
+            var comparer = new CardComparer(_config);
+            var components = DecomposeThrowComponents(cards);
+
+            var single = components
+                .Where(component => component.Type == ThrowComponentType.Single)
+                .OrderBy(component => component.HighestCard, comparer)
+                .FirstOrDefault();
+            if (single != null)
+                return TakeFromOriginal(cards, single.Cards).OrderBy(card => card, comparer).ToList();
+
+            var pair = components
+                .Where(component => component.Type == ThrowComponentType.Pair)
+                .OrderBy(component => component.HighestCard, comparer)
+                .FirstOrDefault();
+            if (pair != null)
+                return TakeFromOriginal(cards, pair.Cards).OrderBy(card => card, comparer).ToList();
+
+            var tractor = components
+                .Where(component => component.Type == ThrowComponentType.Tractor)
+                .OrderBy(component => component.PairCount)
+                .ThenBy(component => component.HighestCard, comparer)
+                .FirstOrDefault();
+
+            if (tractor != null)
+                return TakeFromOriginal(cards, tractor.Cards).OrderBy(card => card, comparer).ToList();
+
+            return new List<Card>();
+        }
+
+        /// <summary>
+        /// 兼容旧接口：返回回退牌型里的最小单张
+        /// </summary>
+        public Card? GetSmallestCard(List<Card> cards)
+        {
+            var fallbackPlay = GetFallbackPlay(cards);
+            if (fallbackPlay.Count == 0)
+                return null;
+
+            var comparer = new CardComparer(_config);
+            return fallbackPlay.OrderBy(card => card, comparer).First();
+        }
+
+        private bool CanBeatComponent(List<Card> sameSuitCards, ThrowComponent component)
+        {
+            var comparer = new CardComparer(_config);
+
+            if (component.Type == ThrowComponentType.Single)
             {
-                analysis.HasTractor = true;
+                var bestSingle = sameSuitCards.OrderByDescending(card => card, comparer).First();
+                return comparer.Compare(bestSingle, component.HighestCard) > 0;
             }
 
-            // 统计对子数量
-            var sorted = cards.OrderBy(c => c.Rank).ThenBy(c => c.Suit).ToList();
-            for (int i = 0; i < sorted.Count - 1; i++)
+            if (component.Type == ThrowComponentType.Pair)
             {
-                if (sorted[i].Equals(sorted[i + 1]))
+                var pairRepresentatives = GetPairRepresentatives(sameSuitCards);
+                return pairRepresentatives.Any(pair => comparer.Compare(pair, component.HighestCard) > 0);
+            }
+
+            // 拖拉机：仅同长度拖拉机可拦截
+            var followerTractors = FindAllTractors(GetPairRepresentatives(sameSuitCards));
+            return followerTractors.Any(tractor =>
+                tractor.PairCount == component.PairCount &&
+                comparer.Compare(tractor.HighestCard, component.HighestCard) > 0);
+        }
+
+        private List<ThrowComponent> DecomposeThrowComponents(List<Card> cards)
+        {
+            var components = new List<ThrowComponent>();
+            if (cards == null || cards.Count == 0 || !IsSameSuitOrTrump(cards))
+                return components;
+
+            var comparer = new CardComparer(_config);
+            var pairRepresentatives = new List<Card>();
+            var singles = new List<Card>();
+
+            // 先拆对子单元与单张
+            var groups = cards
+                .GroupBy(card => card)
+                .Select(group => new { Card = group.Key, Count = group.Count() })
+                .ToList();
+
+            foreach (var group in groups)
+            {
+                int pairCount = group.Count / 2;
+                for (int i = 0; i < pairCount; i++)
+                    pairRepresentatives.Add(group.Card);
+
+                if (group.Count % 2 == 1)
+                    singles.Add(group.Card);
+            }
+
+            // 拖拉机优先：每次取“最长且最大”的拖拉机并移除，再继续识别
+            while (true)
+            {
+                var tractors = FindAllTractors(pairRepresentatives);
+                if (tractors.Count == 0)
+                    break;
+
+                var best = tractors
+                    .OrderByDescending(tractor => tractor.PairCount)
+                    .ThenByDescending(tractor => tractor.HighestCard, comparer)
+                    .First();
+
+                components.Add(best);
+                RemovePairRepresentatives(pairRepresentatives, best.Cards);
+            }
+
+            // 剩余对子
+            foreach (var pair in pairRepresentatives)
+            {
+                components.Add(new ThrowComponent(
+                    ThrowComponentType.Pair,
+                    new List<Card> { pair, pair },
+                    1,
+                    pair));
+            }
+
+            // 单张
+            foreach (var single in singles)
+            {
+                components.Add(new ThrowComponent(
+                    ThrowComponentType.Single,
+                    new List<Card> { single },
+                    0,
+                    single));
+            }
+
+            return components;
+        }
+
+        private List<Card> TakeFromOriginal(List<Card> originalCards, List<Card> patternCards)
+        {
+            var pool = new List<Card>(originalCards);
+            var selected = new List<Card>();
+
+            foreach (var patternCard in patternCards)
+            {
+                var found = pool.FirstOrDefault(card => card.Equals(patternCard));
+                if (found == null)
+                    return new List<Card>();
+
+                selected.Add(found);
+                pool.Remove(found);
+            }
+
+            return selected;
+        }
+
+        private void RemovePairRepresentatives(List<Card> sourcePairs, List<Card> usedCards)
+        {
+            var toRemove = usedCards.GroupBy(card => card).ToDictionary(group => group.Key, group => group.Count() / 2);
+
+            foreach (var entry in toRemove)
+            {
+                int remaining = entry.Value;
+                for (int i = sourcePairs.Count - 1; i >= 0 && remaining > 0; i--)
                 {
-                    analysis.PairCount++;
-                    i++; // 跳过已配对的牌
+                    if (!sourcePairs[i].Equals(entry.Key))
+                        continue;
+
+                    sourcePairs.RemoveAt(i);
+                    remaining--;
+                }
+            }
+        }
+
+        private List<ThrowComponent> FindAllTractors(List<Card> pairRepresentatives)
+        {
+            var tractors = new List<ThrowComponent>();
+            if (pairRepresentatives.Count < 2)
+                return tractors;
+
+            var comparer = new CardComparer(_config);
+            int count = pairRepresentatives.Count;
+            int maskLimit = 1 << count;
+
+            for (int mask = 0; mask < maskLimit; mask++)
+            {
+                int pairCount = CountBits(mask);
+                if (pairCount < 2)
+                    continue;
+
+                var candidatePairs = new List<Card>(pairCount);
+                var candidateCards = new List<Card>(pairCount * 2);
+
+                for (int i = 0; i < count; i++)
+                {
+                    if ((mask & (1 << i)) == 0)
+                        continue;
+
+                    var pair = pairRepresentatives[i];
+                    candidatePairs.Add(pair);
+                    candidateCards.Add(pair);
+                    candidateCards.Add(pair);
+                }
+
+                var pattern = new CardPattern(candidateCards, _config);
+                if (!pattern.IsTractor(candidateCards))
+                    continue;
+
+                var sortedPairs = candidatePairs.OrderBy(c => c, comparer).ToList();
+                tractors.Add(new ThrowComponent(
+                    ThrowComponentType.Tractor,
+                    candidateCards,
+                    pairCount,
+                    sortedPairs[^1]));
+            }
+
+            return tractors;
+        }
+
+        private List<Card> GetPairRepresentatives(List<Card> cards)
+        {
+            var comparer = new CardComparer(_config);
+            var pairs = new List<Card>();
+
+            var groups = cards
+                .GroupBy(card => card)
+                .Select(group => new { Card = group.Key, Count = group.Count() });
+
+            foreach (var group in groups)
+            {
+                int pairCount = group.Count / 2;
+                for (int i = 0; i < pairCount; i++)
+                {
+                    pairs.Add(group.Card);
                 }
             }
 
-            return analysis;
+            return pairs.OrderByDescending(c => c, comparer).ToList();
+        }
+
+        private static int CountBits(int value)
+        {
+            int count = 0;
+            while (value != 0)
+            {
+                value &= value - 1;
+                count++;
+            }
+
+            return count;
+        }
+
+        private bool IsSameSuitOrTrump(List<Card> cards)
+        {
+            bool allTrump = cards.All(c => _config.IsTrump(c));
+            if (allTrump) return true;
+
+            bool allSuit = cards.All(c => !_config.IsTrump(c));
+            if (!allSuit) return false;
+
+            var firstSuit = cards[0].Suit;
+            return cards.All(c => c.Suit == firstSuit);
         }
 
         private string GetSuitOrCategory(Card card)
@@ -99,22 +346,31 @@ namespace TractorGame.Core.Rules
             return card.Suit.ToString();
         }
 
-        /// <summary>
-        /// 获取甩牌失败后的最小单牌
-        /// </summary>
-        public Card GetSmallestCard(List<Card> cards)
+        private enum ThrowComponentType
         {
-            if (cards == null || cards.Count == 0)
-                return null;
-
-            var comparer = new CardComparer(_config);
-            return cards.OrderBy(c => c, comparer).First();
+            Tractor,
+            Pair,
+            Single
         }
 
-        private class PatternAnalysis
+        private sealed class ThrowComponent
         {
-            public bool HasTractor { get; set; }
-            public int PairCount { get; set; }
+            public ThrowComponentType Type { get; }
+            public List<Card> Cards { get; }
+            public int PairCount { get; }
+            public Card HighestCard { get; }
+
+            public ThrowComponent(
+                ThrowComponentType type,
+                List<Card> cards,
+                int pairCount,
+                Card highestCard)
+            {
+                Type = type;
+                Cards = cards;
+                PairCount = pairCount;
+                HighestCard = highestCard;
+            }
         }
     }
 }

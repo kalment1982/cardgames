@@ -1,0 +1,348 @@
+/* 游戏容器 - 横屏布局 */
+.game-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: #0D5C2F;
+    overflow: hidden;
+    font-family: 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+}
+
+/* 左上角信息栏 */
+.info-panel {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.settings-btn {
+    width: 40px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.settings-btn:hover {
+    transform: scale(1.1);
+}
+
+.team-info {
+    background: rgba(0, 0, 0, 0.6);
+    padding: 10px 15px;
+    border-radius: 8px;
+    color: white;
+    font-size: 16px;
+}
+
+.team-row {
+    line-height: 30px;
+}
+
+/* 玩家位置 */
+.player-north {
+    position: absolute;
+    top: 12%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.player-west {
+    position: absolute;
+    left: 3%;
+    top: 40%;
+    transform: translateY(-50%);
+}
+
+.player-east {
+    position: absolute;
+    right: 3%;
+    top: 40%;
+    transform: translateY(-50%);
+}
+
+.player-avatar {
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* 出牌显示区 */
+.play-area {
+    position: absolute;
+    top: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90%;
+    max-width: 1200px;
+    height: 60%;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+/* 北玩家出牌区 */
+.played-cards-north {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 10px;
+    max-width: 100%;
+}
+
+/* 中间行：西和东玩家出牌 */
+.played-cards-middle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 20px;
+    flex: 1;
+}
+
+/* 西玩家出牌区 */
+.played-cards-west {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-start;
+    align-items: center;
+    width: 48%;
+    max-width: 48%;
+}
+
+/* 东玩家出牌区 */
+.played-cards-east {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-end;
+    align-items: center;
+    width: 48%;
+    max-width: 48%;
+}
+
+/* 南玩家出牌区 */
+.played-cards-south {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;
+    max-width: 100%;
+}
+
+/* 出牌卡牌 - 基础尺寸 */
+.played-card {
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.2s ease;
+}
+
+/* 根据牌数量动态调整尺寸 */
+.played-card.size-small {
+    width: 45px;
+    height: 67px;
+}
+
+.played-card.size-medium {
+    width: 55px;
+    height: 82px;
+}
+
+.played-card.size-large {
+    width: 70px;
+    height: 105px;
+}
+
+/* 亮牌框 */
+.bidding-panel {
+    position: absolute;
+    bottom: 200px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 12px;
+}
+
+.suit-btn {
+    width: 50px;
+    height: 50px;
+    font-size: 24px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    background: rgba(0, 0, 0, 0.3);
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.suit-btn.active {
+    border-color: #F1C40F;
+    background: rgba(241, 196, 15, 0.3);
+    box-shadow: 0 0 15px rgba(241, 196, 15, 0.5);
+    animation: pulse 1.5s infinite;
+}
+
+.suit-btn:hover {
+    transform: scale(1.1);
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+}
+
+/* 手牌区 */
+.hand-area {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    max-width: 90vw;
+    overflow-x: auto;
+    padding: 10px;
+}
+
+.hand-card {
+    width: 60px;
+    height: 90px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.hand-card:hover {
+    transform: translateY(-5px);
+}
+
+.hand-card.selected {
+    transform: translateY(-20px);
+    border: 2px solid #F1C40F;
+    box-shadow: 0 4px 8px rgba(241, 196, 15, 0.5);
+}
+
+/* 操作按钮 */
+.action-buttons {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+}
+
+.btn {
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: white;
+    font-weight: bold;
+}
+
+.btn:hover {
+    transform: scale(1.05);
+}
+
+.btn:disabled {
+    background: #BDC3C7;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-play {
+    background: #2ECC71;
+}
+
+.btn-play:hover:not(:disabled) {
+    background: #27AE60;
+}
+
+.btn-bury {
+    background: #3498DB;
+}
+
+.btn-bury:hover {
+    background: #2980B9;
+}
+
+.btn-view {
+    background: #F39C12;
+}
+
+.btn-view:hover {
+    background: #E67E22;
+}
+
+.btn-history {
+    background: #95A5A6;
+}
+
+.btn-history:hover {
+    background: #7F8C8D;
+}
+
+/* 提示信息 */
+.message-toast {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(231, 76, 60, 0.9);
+    color: white;
+    padding: 15px 30px;
+    border-radius: 8px;
+    font-size: 18px;
+    font-weight: bold;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: fadeInOut 2s;
+    z-index: 1000;
+}
+
+@keyframes fadeInOut {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+    10% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    90% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+    .hand-card {
+        width: 50px;
+        height: 75px;
+    }
+
+    .played-card {
+        width: 70px;
+        height: 105px;
+    }
+}

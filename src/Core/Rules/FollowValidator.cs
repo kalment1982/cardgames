@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.Models;
+using TractorGame.Core.Logging;
 
 namespace TractorGame.Core.Rules
 {
@@ -26,12 +27,20 @@ namespace TractorGame.Core.Rules
         /// </summary>
         public bool IsValidFollow(List<Card> hand, List<Card> leadCards, List<Card> followCards)
         {
+            return IsValidFollowEx(hand, leadCards, followCards).Success;
+        }
+
+        /// <summary>
+        /// 检查跟牌是否合法，返回失败原因。
+        /// </summary>
+        public OperationResult IsValidFollowEx(List<Card> hand, List<Card> leadCards, List<Card> followCards)
+        {
             if (followCards == null || followCards.Count == 0)
-                return false;
+                return OperationResult.Fail(ReasonCodes.FollowCountMismatch);
             if (followCards.Count != leadCards.Count)
-                return false;
+                return OperationResult.Fail(ReasonCodes.FollowCountMismatch);
             if (!AllCardsInHand(hand, followCards))
-                return false;
+                return OperationResult.Fail(ReasonCodes.CardNotInHand);
 
             var leadCategory = GetCardCategory(leadCards[0]);
             var leadSuit     = leadCards[0].Suit;
@@ -44,7 +53,7 @@ namespace TractorGame.Core.Rules
             if (available == 0)
             {
                 // 无首引花色，任意出牌合法
-                return true;
+                return OperationResult.Ok;
             }
 
             // 跟牌中属于首引花色的张数
@@ -53,13 +62,13 @@ namespace TractorGame.Core.Rules
 
             // 必须跟尽所有能跟的首引花色
             if (followSuitCards.Count < mustFollow)
-                return false;
+                return OperationResult.Fail(ReasonCodes.FollowSuitRequired);
 
             // 如果首引花色数量足够填满，还需检查牌型约束
             if (available >= needed)
-                return ValidatePatternConstraint(hand, leadCards, followCards, leadSuit, leadCategory);
+                return ValidatePatternConstraintEx(hand, leadCards, followCards, leadSuit, leadCategory);
 
-            return true;
+            return OperationResult.Ok;
         }
 
         private bool AllCardsInHand(List<Card> hand, List<Card> cards)
@@ -105,20 +114,22 @@ namespace TractorGame.Core.Rules
             }
         }
 
-        private bool ValidatePatternConstraint(List<Card> hand, List<Card> leadCards,
+        private OperationResult ValidatePatternConstraintEx(List<Card> hand, List<Card> leadCards,
             List<Card> followCards, Suit suit, CardCategory category)
         {
             var leadPattern = new CardPattern(leadCards, _config);
 
             if (leadPattern.Type == PatternType.Single)
-                return true;
+                return OperationResult.Ok;
 
             if (leadPattern.Type == PatternType.Pair)
             {
                 // 有对子必须出对子
                 if (GetAvailablePairs(hand, suit, category).Count > 0)
-                    return CardPattern.IsPair(followCards);
-                return true;
+                    return CardPattern.IsPair(followCards)
+                        ? OperationResult.Ok
+                        : OperationResult.Fail(ReasonCodes.FollowPairRequired);
+                return OperationResult.Ok;
             }
 
             if (leadPattern.Type == PatternType.Tractor)
@@ -131,14 +142,17 @@ namespace TractorGame.Core.Rules
                 {
                     // 跟牌必须是拖拉机
                     var followSuitCards = followCards.Where(c => MatchesSuit(c, suit, category)).ToList();
-                    if (followSuitCards.Count < tractorLen) return false;
+                    if (followSuitCards.Count < tractorLen)
+                        return OperationResult.Fail(ReasonCodes.FollowTractorRequired);
                     var followPattern = new CardPattern(followSuitCards, _config);
-                    return followPattern.IsTractor(followSuitCards);
+                    return followPattern.IsTractor(followSuitCards)
+                        ? OperationResult.Ok
+                        : OperationResult.Fail(ReasonCodes.FollowTractorRequired);
                 }
-                return true;
+                return OperationResult.Ok;
             }
 
-            return true;
+            return OperationResult.Ok;
         }
 
         /// <summary>

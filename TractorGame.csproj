@@ -15,4 +15,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="WebUI/**" />
+    <EmbeddedResource Remove="WebUI/**" />
+    <None Remove="WebUI/**" />
+  </ItemGroup>
+
 </Project>

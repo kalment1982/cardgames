@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.Models;
+using TractorGame.Core.Logging;
 
 namespace TractorGame.Core.Rules
 {
@@ -21,16 +22,79 @@ namespace TractorGame.Core.Rules
         /// </summary>
         public bool IsValidPlay(List<Card> hand, List<Card> cardsToPlay)
         {
+            return IsValidPlayEx(hand, cardsToPlay).Success;
+        }
+
+        /// <summary>
+        /// 检查出牌是否合法（首家出牌），返回失败原因。
+        /// </summary>
+        public OperationResult IsValidPlayEx(List<Card> hand, List<Card> cardsToPlay)
+        {
             // 基础检查
             if (cardsToPlay == null || cardsToPlay.Count == 0)
-                return false;
+                return OperationResult.Fail(ReasonCodes.PlayPatternInvalid);
 
             // 检查是否都在手牌中
             if (!AllCardsInHand(hand, cardsToPlay))
-                return false;
+                return OperationResult.Fail(ReasonCodes.CardNotInHand);
+
+            // 单张总是合法
+            if (cardsToPlay.Count == 1)
+                return OperationResult.Ok;
 
             // 检查牌型是否有效
-            return ValidatePattern(cardsToPlay);
+            return ValidatePattern(cardsToPlay)
+                ? OperationResult.Ok
+                : OperationResult.Fail(ReasonCodes.PlayPatternInvalid);
+        }
+
+        /// <summary>
+        /// 检查出牌是否合法（首家出牌），并验证甩牌
+        /// </summary>
+        public bool IsValidPlay(List<Card> hand, List<Card> cardsToPlay, List<List<Card>> otherHands)
+        {
+            return IsValidPlayEx(hand, cardsToPlay, otherHands).Success;
+        }
+
+        /// <summary>
+        /// 检查出牌是否合法（首家出牌），并验证甩牌，返回失败原因。
+        /// </summary>
+        public OperationResult IsValidPlayEx(List<Card> hand, List<Card> cardsToPlay, List<List<Card>> otherHands)
+        {
+            // 基础检查
+            var baseResult = IsValidPlayEx(hand, cardsToPlay);
+            if (!baseResult.Success)
+                return baseResult;
+
+            // 单张、对子、拖拉机不需要额外验证
+            if (cardsToPlay.Count <= 2)
+                return OperationResult.Ok;
+
+            var pattern = new CardPattern(cardsToPlay, _config);
+            if (pattern.IsTractor(cardsToPlay))
+                return OperationResult.Ok;
+
+            // 混合牌型（甩牌）需要验证是否能成功
+            return ValidateThrow(cardsToPlay, otherHands)
+                ? OperationResult.Ok
+                : OperationResult.Fail(ReasonCodes.ThrowNotMax);
+        }
+
+        /// <summary>
+        /// 验证甩牌是否能成功
+        /// </summary>
+        private bool ValidateThrow(List<Card> throwCards, List<List<Card>> otherHands)
+        {
+            // 检查是否同花色
+            if (!IsSameSuitOrTrump(throwCards))
+                return false;
+
+            // 如果没有提供其他玩家手牌，只能做基础验证
+            if (otherHands == null || otherHands.Count == 0)
+                return true;
+
+            var throwValidator = new ThrowValidator(_config);
+            return throwValidator.IsThrowSuccessful(throwCards, otherHands);
         }
 
         /// <summary>

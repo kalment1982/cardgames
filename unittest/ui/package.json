@@ -1,0 +1,12 @@
+{
+  "name": "tractor-ui-automation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:ui": "node run-ui-campaign.mjs --games 5",
+    "test:ui:50": "node run-ui-campaign.mjs --games 50"
+  },
+  "devDependencies": {
+    "playwright": "^1.53.0"
+  }
+}

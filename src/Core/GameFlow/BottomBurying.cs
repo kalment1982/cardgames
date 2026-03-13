@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.Models;
+using TractorGame.Core.Logging;
 
 namespace TractorGame.Core.GameFlow
 {
@@ -27,8 +28,16 @@ namespace TractorGame.Core.GameFlow
         /// </summary>
         public bool BuryCards(List<Card> hand, List<Card> cardsToBury)
         {
+            return BuryCardsEx(hand, cardsToBury).Success;
+        }
+
+        /// <summary>
+        /// 扣底（庄家选择8张牌），返回失败原因。
+        /// </summary>
+        public OperationResult BuryCardsEx(List<Card> hand, List<Card> cardsToBury)
+        {
             if (cardsToBury == null || cardsToBury.Count != 8)
-                return false;
+                return OperationResult.Fail(ReasonCodes.BuryNot8Cards);
 
             // 检查所有牌都在手牌中
             var handCopy = new List<Card>(hand);
@@ -37,12 +46,12 @@ namespace TractorGame.Core.GameFlow
             foreach (var card in cardsToBury)
             {
                 if (!handCopy.Contains(card))
-                    return false;
+                    return OperationResult.Fail(ReasonCodes.BuryCardNotFound);
                 handCopy.Remove(card);
             }
 
             _buriedCards = new List<Card>(cardsToBury);
-            return true;
+            return OperationResult.Ok;
         }
     }
 }
