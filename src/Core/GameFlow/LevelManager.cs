@@ -73,10 +73,10 @@ namespace TractorGame.Core.GameFlow
 
     public class LevelResult
     {
-        public string Winner { get; set; }
+        public string Winner { get; set; } = string.Empty;
         public int DefenderScore { get; set; }
         public int LevelChange { get; set; }
         public Rank NextLevel { get; set; }
-        public string NextDealer { get; set; }
+        public string NextDealer { get; set; } = string.Empty;
     }
 }

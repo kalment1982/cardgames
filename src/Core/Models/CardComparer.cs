@@ -14,7 +14,7 @@ namespace TractorGame.Core.Models
             _config = config;
         }
 
-        public int Compare(Card x, Card y)
+        public int Compare(Card? x, Card? y)
         {
             if (x == null || y == null) return 0;
 

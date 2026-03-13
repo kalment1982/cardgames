@@ -1,0 +1,178 @@
+@page "/replay"
+@using WebUI.Application
+@using Microsoft.AspNetCore.Components.Forms
+@inject ReplayLogParserService ReplayParser
+
+<PageTitle>日志回放</PageTitle>
+
+<div class="replay-page">
+    <h1>日志回放与判定核对</h1>
+    <p class="hint">上传 <code>logs/raw/*.jsonl</code>，按墩逐步查看四家手牌、四家出牌、赢家和判定依据。</p>
+
+    <div class="upload-row">
+        <InputFile OnChange="OnFileSelected" accept=".jsonl,.log,.txt,.md" />
+        <span class="status">@StatusText</span>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(ErrorText))
+    {
+        <div class="error">@ErrorText</div>
+    }
+
+    @if (Result?.Success == true && Current != null)
+    {
+        <div class="toolbar">
+            <button @onclick="PrevTrick" disabled="@(_index <= 0)">上一墩</button>
+            <button @onclick="NextTrick" disabled="@(_index >= Result.Tricks.Count - 1)">下一墩</button>
+            <span>第 @Current.TrickNo 墩 / 共 @Result.Tricks.Count 墩</span>
+            <span>game: @Result.GameId</span>
+        </div>
+
+        <div class="meta">
+            <div><strong>打级</strong> @Current.LevelRank</div>
+            <div><strong>主花色</strong> @Current.TrumpSuit</div>
+            <div><strong>庄家</strong> @FormatPlayer(Current.DealerIndex)</div>
+            <div><strong>首出</strong> @FormatPlayer(Current.LeadPlayer)</div>
+            <div><strong>闲家分</strong> @Current.DefenderScoreBefore → @Current.DefenderScoreAfter</div>
+        </div>
+
+        <h3>四家手牌（出牌前）</h3>
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th>玩家</th>
+                    <th>手牌数</th>
+                    <th>手牌</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var hand in Current.HandsBefore.OrderBy(x => x.PlayerIndex))
+                {
+                    <tr>
+                        <td>@FormatPlayer(hand.PlayerIndex)</td>
+                        <td>@hand.HandCount</td>
+                        <td class="cards">@string.Join(" ", hand.Cards)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h3>四家出牌（本墩）</h3>
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th>玩家</th>
+                    <th>出牌</th>
+                    <th>牌型</th>
+                    <th>类别</th>
+                    <th>牌分</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var play in Current.Plays.OrderBy(x => x.PlayerIndex))
+                {
+                    var analysis = GetAnalysis(play.PlayerIndex);
+                    <tr>
+                        <td>@FormatPlayer(play.PlayerIndex)</td>
+                        <td class="cards">@string.Join(" ", play.Cards)</td>
+                        <td>@analysis.Pattern</td>
+                        <td>@analysis.Category</td>
+                        <td>@analysis.CardScore</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h3>判定结果</h3>
+        <div class="judge-box">
+            <div><strong>赢家：</strong>@FormatPlayer(Current.WinnerIndex)</div>
+            <div><strong>本墩分：</strong>@Current.TrickScore</div>
+            <div><strong>判定依据：</strong>@(string.IsNullOrWhiteSpace(Current.WinnerReason) ? "（日志未提供）" : Current.WinnerReason)</div>
+        </div>
+    }
+</div>
+
+@code {
+    private ReplayParseResult? Result;
+    private ReplayTrickFrame? Current;
+    private int _index;
+    private string StatusText = "未加载日志";
+    private string ErrorText = string.Empty;
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        ErrorText = string.Empty;
+        Result = null;
+        Current = null;
+        _index = 0;
+
+        var file = e.File;
+        if (file == null)
+            return;
+
+        StatusText = $"正在解析：{file.Name}";
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 50 * 1024 * 1024);
+            using var reader = new StreamReader(stream);
+            var content = await reader.ReadToEndAsync();
+
+            Result = ReplayParser.Parse(content);
+            if (!Result.Success)
+            {
+                ErrorText = Result.Message;
+                StatusText = "解析失败";
+                return;
+            }
+
+            Current = Result.Tricks.FirstOrDefault();
+            StatusText = Result.Message;
+        }
+        catch (Exception ex)
+        {
+            ErrorText = ex.Message;
+            StatusText = "加载失败";
+        }
+    }
+
+    private void PrevTrick()
+    {
+        if (Result == null || _index <= 0)
+            return;
+
+        _index--;
+        Current = Result.Tricks[_index];
+    }
+
+    private void NextTrick()
+    {
+        if (Result == null || _index >= Result.Tricks.Count - 1)
+            return;
+
+        _index++;
+        Current = Result.Tricks[_index];
+    }
+
+    private ReplayPlayAnalysis GetAnalysis(int playerIndex)
+    {
+        if (Current == null)
+            return new ReplayPlayAnalysis();
+
+        return Current.PlayAnalysis.TryGetValue(playerIndex, out var analysis)
+            ? analysis
+            : new ReplayPlayAnalysis();
+    }
+
+    private static string FormatPlayer(int index)
+    {
+        return index switch
+        {
+            0 => "玩家0(南)",
+            1 => "玩家1(东)",
+            2 => "玩家2(北)",
+            3 => "玩家3(西)",
+            _ => $"玩家{index}"
+        };
+    }
+}

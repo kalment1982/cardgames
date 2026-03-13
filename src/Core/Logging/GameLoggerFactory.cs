@@ -39,8 +39,15 @@ namespace TractorGame.Core.Logging
             if (OperatingSystem.IsBrowser())
                 return NullGameLogger.Instance;
 
-            var rootPath = GetDefaultLogRootPath();
-            return new CoreLogger(new JsonLineLogSink(rootPath));
+            var rawRoot = GetDefaultLogRootPath();
+            var repoRoot = ResolveRepoRoot();
+            var replayRoot = Path.GetFullPath(Path.Combine(repoRoot, "logs", "replay"));
+
+            var sink = new CompositeLogSink(
+                new JsonLineLogSink(rawRoot),
+                new MarkdownReplayLogSink(replayRoot));
+
+            return new CoreLogger(sink);
         }
 
         private static bool IsDisabled()

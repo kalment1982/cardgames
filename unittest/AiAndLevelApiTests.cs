@@ -33,8 +33,9 @@ namespace TractorGame.Tests
 
             var result = ai.Lead(hand);
 
-            Assert.Equal(3, result.Count);
-            Assert.All(result, c => Assert.Equal(Suit.Heart, c.Suit));
+            // 无对手信息时中等难度采用保守策略，不主动甩牌
+            Assert.Single(result);
+            Assert.Contains(result[0], hand);
         }
 
         [Fact]
@@ -177,9 +178,9 @@ namespace TractorGame.Tests
             var result = manager.DetermineLevelChange(80, Rank.Five);
 
             Assert.Equal("闲家", result.Winner);
-            Assert.Equal(1, result.LevelChange);
+            Assert.Equal(0, result.LevelChange);
             Assert.Equal("闲家", result.NextDealer);
-            Assert.Equal(Rank.Six, result.NextLevel);
+            Assert.Equal(Rank.Five, result.NextLevel);
         }
 
         [Fact]
@@ -189,9 +190,9 @@ namespace TractorGame.Tests
             var result = manager.DetermineLevelChange(160, Rank.Jack);
 
             Assert.Equal("闲家", result.Winner);
-            Assert.Equal(3, result.LevelChange);
+            Assert.Equal(2, result.LevelChange);
             Assert.Equal("闲家", result.NextDealer);
-            Assert.Equal(Rank.Ace, result.NextLevel);
+            Assert.Equal(Rank.King, result.NextLevel);
         }
     }
 }

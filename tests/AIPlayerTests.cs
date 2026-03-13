@@ -24,8 +24,9 @@ namespace TractorGame.Tests
 
             var result = ai.Lead(hand, AIRole.Opponent);
 
-            Assert.Equal(3, result.Count);
-            Assert.All(result, c => Assert.Equal(Suit.Heart, c.Suit));
+            // 无对手信息时中等难度采用保守策略，不主动甩牌
+            Assert.Single(result);
+            Assert.Contains(result[0], hand);
         }
 
         [Fact]

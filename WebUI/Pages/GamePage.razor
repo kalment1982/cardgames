@@ -1,25 +1,30 @@
 @page "/game"
 @using System
 @using System.Collections.Generic
-@using System.Globalization
 @using System.Linq
-@using System.Text.Json
-@using Microsoft.JSInterop
 @using TractorGame.Core.Models
 @using TractorGame.Core.GameFlow
 @using TractorGame.Core.AI
 @using TractorGame.Core.Rules
-@using TractorGame.Core.Logging
+@using WebUI.Application
+@implements IDisposable
 @inject NavigationManager Navigation
-@inject IJSRuntime JS
+@inject UiMessageService MessageService
+@inject UiAutomationService AutomationService
+@inject AITurnService AITurnService
+@inject GameSessionService GameSessionService
+@inject PlayerActionService PlayerActionService
+@inject UiTelemetryService UiTelemetryService
+@inject UiTestActionService UiTestActionService
+@inject TurnPlayService TurnPlayService
 
 <div class="game-container">
     <!-- 左上角信息栏 -->
     <div class="info-panel">
         <div class="settings-btn" data-testid="btn-settings" @onclick="ToggleSettings">⚙️</div>
         <div class="team-info">
-            <div class="team-row">我方｜@OurLevel｜@(TrumpSuit ?? "NT")｜抓分</div>
-            <div class="team-row">对方｜@TheirLevel｜@(OpponentTrumpSuit)｜@DefenderScore</div>
+            <div class="team-row">我方｜@Vm.OurLevel｜@(Vm.TrumpSuit ?? "NT")｜抓分</div>
+            <div class="team-row">对方｜@Vm.TheirLevel｜@(Vm.OpponentTrumpSuit)｜@Vm.DefenderScore</div>
         </div>
     </div>
 
@@ -78,7 +83,7 @@
     </div>
 
     <!-- 亮牌框（仅发牌阶段显示） -->
-    @if (ShowBiddingPanel)
+    @if (Vm.ShowBiddingPanel)
     {
         <div class="bidding-panel" data-testid="bidding-panel">
             <button class="suit-btn @(CanBid(Suit.Joker) ? "active" : "")" data-testid="bid-joker" @onclick="() => BidTrump(Suit.Joker)">🃏</button>
@@ -91,10 +96,10 @@
 
     <!-- 手牌区 -->
     <div class="hand-area" data-testid="hand-area">
-        @foreach (var (card, index) in PlayerHand.Select((c, i) => (c, i)))
+        @foreach (var (card, index) in Vm.PlayerHand.Select((c, i) => (c, i)))
         {
             <img src="@GetCardImage(card)"
-                 class="hand-card @(SelectedCardIndices.Contains(index) ? "selected" : "")"
+                 class="hand-card @(Vm.SelectedCardIndices.Contains(index) ? "selected" : "")"
                  data-testid="hand-card"
                  data-card-index="@index"
                  data-card-key="@($"{card.Suit}-{card.Rank}")"
@@ -106,11 +111,11 @@
     <!-- 操作按钮 -->
     <div class="action-buttons">
         <button class="btn btn-play" data-testid="btn-play" @onclick="PlayCards" disabled="@(!CanPlay)">出牌</button>
-        @if (ShowBuryButton)
+        @if (Vm.ShowBuryButton)
         {
             <button class="btn btn-bury" data-testid="btn-bury" @onclick="BuryCards">扣底</button>
         }
-        @if (ShowViewBottomButton)
+        @if (Vm.ShowViewBottomButton)
         {
             <button class="btn btn-view" data-testid="btn-view-bottom" @onclick="ViewBottom">查看底牌</button>
         }
@@ -128,43 +133,29 @@
         <div data-testid="test-state"
              data-phase="@GetPhaseName()"
              data-current-player="@GetCurrentPlayer()"
-             data-defender-score="@DefenderScore"
-             data-selected-count="@SelectedCardIndices.Count"
-             data-hand-count="@PlayerHand.Count"
+             data-defender-score="@Vm.DefenderScore"
+             data-selected-count="@Vm.SelectedCardIndices.Count"
+             data-hand-count="@Vm.PlayerHand.Count"
              data-trick-count="@_trickNumber"
              style="display:none"></div>
     }
 
     <!-- 提示信息 -->
-    @if (!string.IsNullOrEmpty(Message))
+    @if (!string.IsNullOrEmpty(MessageService.CurrentMessage))
     {
-        <div class="message-toast" data-testid="message-toast">@Message</div>
+        <div class="message-toast" data-testid="message-toast">@MessageService.CurrentMessage</div>
     }
 </div>
 
 @code {
     // 游戏状态
     private Game? game;
-    private List<Card> PlayerHand = new();
-    private HashSet<int> SelectedCardIndices = new();
+    private readonly GamePageViewModel Vm = new();
     private List<TrickPlay>? _displayTrick = null; // 用于显示最后一家出牌
-    private readonly IGameLogger _uiLogger = GameLoggerFactory.CreateDefault();
-
-    // UI状态
-    private string? TrumpSuit;
-    private string? OpponentTrumpSuit = "NT";
-    private int DefenderScore = 0;
-    private string OurLevel = "2";
-    private string TheirLevel = "2";
-    private string Message = "";
-    private bool ShowBiddingPanel = false;
-    private bool ShowBuryButton = false;
-    private bool ShowViewBottomButton = false;
-    private bool CanPlay => SelectedCardIndices.Count > 0 && game?.State.Phase == GamePhase.Playing && game?.State.CurrentPlayer == 0;
+    private bool CanPlay => Vm.SelectedCardIndices.Count > 0 && game?.State.Phase == GamePhase.Playing && game?.State.CurrentPlayer == 0;
 
     // 自动化测试状态
     private bool IsUiTestMode = false;
-    private bool _testHooksReady = false;
     private int? ForcedSeed;
     private int CurrentSeed;
     private int _trickNumber = 0;
@@ -172,6 +163,8 @@
 
     protected override void OnInitialized()
     {
+        MessageService.Changed += OnMessageChanged;
+        MessageService.Clear();
         ParseAutomationOptions();
         StartNewGame();
     }
@@ -182,175 +175,43 @@
             await InitializeTestHooksAsync();
     }
 
+    public void Dispose()
+    {
+        MessageService.Changed -= OnMessageChanged;
+    }
+
+    private void OnMessageChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     private void ParseAutomationOptions()
     {
-        var uri = new Uri(Navigation.Uri);
-        var query = ParseQuery(uri.Query);
-
-        if (query.TryGetValue("autotest", out var autoTest))
-            IsUiTestMode = IsTruthy(autoTest);
-
-        if (query.TryGetValue("seed", out var seedText) && int.TryParse(seedText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seed) && seed > 0)
-            ForcedSeed = seed;
-    }
-
-    private static Dictionary<string, string> ParseQuery(string query)
-    {
-        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(query))
-            return dict;
-
-        var text = query.StartsWith("?") ? query[1..] : query;
-        foreach (var part in text.Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var kv = part.Split('=', 2);
-            var key = Uri.UnescapeDataString(kv[0]);
-            var value = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
-            dict[key] = value;
-        }
-
-        return dict;
-    }
-
-    private static bool IsTruthy(string value)
-    {
-        return value.Equals("1", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("true", StringComparison.OrdinalIgnoreCase)
-            || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        AutomationService.ConfigureFromUri(Navigation.Uri);
+        IsUiTestMode = AutomationService.IsEnabled;
+        ForcedSeed = AutomationService.ForcedSeed;
     }
 
     private void StartNewGame()
     {
-        CurrentSeed = ForcedSeed ?? DateTime.Now.Millisecond;
+        var session = GameSessionService.StartNewGame(ForcedSeed);
+        game = session.Game;
+        CurrentSeed = session.Seed;
         _trickNumber = 0;
         _actionCounter = 0;
-
-        game = new Game(CurrentSeed);
-        game.StartGame();
+        Vm.SelectedCardIndices.Clear();
         UpdateUI();
-
-        // 显示亮牌框（发牌后进入亮主阶段）
-        ShowBiddingPanel = true;
         ShowMessage("发牌完成，请亮主");
     }
 
     private async Task InitializeTestHooksAsync()
     {
-        try
-        {
-            await JS.InvokeVoidAsync("tractorTest.clearEvents");
-            _testHooksReady = true;
-            await PushTestEventAsync(new
-            {
-                type = "game_start",
-                seed = CurrentSeed,
-                levelRank = game?.State.LevelRank.ToString(),
-                dealerIndex = game?.State.DealerIndex ?? -1
-            });
-        }
-        catch
-        {
-            _testHooksReady = false;
-        }
+        await AutomationService.InitializeTestHooksAsync(game, CurrentSeed);
     }
 
     private async Task PushTestEventAsync(object payload)
     {
-        if (!IsUiTestMode || !_testHooksReady)
-            return;
-
-        LogMappedTestEvent(payload);
-
-        try
-        {
-            await JS.InvokeVoidAsync("tractorTest.pushEvent", payload);
-        }
-        catch
-        {
-            // 忽略测试钩子异常，避免影响正常游戏
-        }
-    }
-
-    private void LogMappedTestEvent(object payload)
-    {
-        try
-        {
-            var element = JsonSerializer.SerializeToElement(payload);
-            if (!element.TryGetProperty("type", out var typeElement))
-                return;
-
-            string? rawType = typeElement.GetString();
-            if (string.IsNullOrWhiteSpace(rawType))
-                return;
-
-            string? normalizedEvent = rawType switch
-            {
-                "game_start" => "game.start",
-                "play" => "play.accept",
-                "play_rejected" => "play.reject",
-                "trick_end" => "trick.finish",
-                "game_finished" => "game.finish",
-                "trump_finalized" => "trump.finalized",
-                "bury_bottom" => "bury.accept",
-                "bid_trump" => "trump.bid.accept",
-                "ai_play_failed" => "error.validation",
-                _ => null
-            };
-
-            if (normalizedEvent == null)
-                return;
-
-            string level = rawType switch
-            {
-                "play_rejected" => LogLevels.Warn,
-                "ai_play_failed" => LogLevels.Warn,
-                _ => LogLevels.Info
-            };
-
-            string category = rawType switch
-            {
-                "ai_play_failed" => LogCategories.Diag,
-                _ => LogCategories.Audit
-            };
-
-            var normalizedPayload = JsonElementToValue(element) as Dictionary<string, object?> ?? new Dictionary<string, object?>();
-            normalizedPayload["raw_type"] = rawType;
-
-            _uiLogger.Log(new LogEntry
-            {
-                Category = category,
-                Level = level,
-                Event = normalizedEvent,
-                SessionId = game?.SessionId,
-                GameId = game?.GameId,
-                RoundId = game?.RoundId,
-                Phase = GetNormalizedPhase(),
-                Actor = "ui",
-                Payload = normalizedPayload
-            });
-        }
-        catch
-        {
-            // 映射失败不影响主流程与测试流程
-        }
-    }
-
-    private static object? JsonElementToValue(JsonElement element)
-    {
-        return element.ValueKind switch
-        {
-            JsonValueKind.Object => element.EnumerateObject()
-                .ToDictionary(p => p.Name, p => JsonElementToValue(p.Value)),
-            JsonValueKind.Array => element.EnumerateArray()
-                .Select(JsonElementToValue)
-                .ToList(),
-            JsonValueKind.String => element.GetString(),
-            JsonValueKind.Number => element.TryGetInt64(out var i64) ? i64 : element.GetDouble(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Null => null,
-            _ => element.ToString()
-        };
+        await AutomationService.PushEventAsync(payload, game, GetNormalizedPhase());
     }
 
     private string GetPhaseName()
@@ -368,53 +229,7 @@
         if (game == null)
             return;
 
-        PlayerHand = new List<Card>(game.State.PlayerHands[0]);
-
-        // 手牌排序：主牌在左，副牌在右，同花色放一起
-        SortHand();
-
-        DefenderScore = game.State.DefenderScore;
-
-        // 更新主花色显示
-        if (game.State.TrumpSuit.HasValue)
-        {
-            TrumpSuit = GetSuitSymbol(game.State.TrumpSuit.Value);
-            OpponentTrumpSuit = TrumpSuit;
-        }
-        else
-        {
-            TrumpSuit = "NT";
-            OpponentTrumpSuit = "NT";
-        }
-
-        // 更新UI状态
-        ShowBiddingPanel = game.State.Phase == GamePhase.Bidding;
-        ShowBuryButton = game.State.Phase == GamePhase.Burying && game.State.DealerIndex == 0;
-        ShowViewBottomButton = game.State.Phase == GamePhase.Burying && game.State.DealerIndex == 0;
-    }
-
-    private void SortHand()
-    {
-        if (game == null || PlayerHand.Count == 0) return;
-
-        var config = BuildCurrentConfig();
-        var comparer = new CardComparer(config);
-
-        // 分组：主牌和副牌
-        var trumpCards = PlayerHand.Where(c => config.IsTrump(c)).OrderByDescending(c => c, comparer).ToList();
-        var nonTrumpCards = PlayerHand.Where(c => !config.IsTrump(c)).ToList();
-
-        // 副牌按花色分组并排序
-        var sortedNonTrump = nonTrumpCards
-            .GroupBy(c => c.Suit)
-            .OrderBy(g => g.Key)
-            .SelectMany(g => g.OrderByDescending(c => c, comparer))
-            .ToList();
-
-        // 主牌在左，副牌在右
-        PlayerHand.Clear();
-        PlayerHand.AddRange(trumpCards);
-        PlayerHand.AddRange(sortedNonTrump);
+        GameSessionService.UpdateViewModel(game, Vm);
     }
 
     private string GetCardImage(Card card)
@@ -455,35 +270,19 @@
         return $"assets/playingcards/PNG-cards-1.3/{rank}_of_{suit}.png";
     }
 
-    private string GetSuitSymbol(Suit suit)
-    {
-        return suit switch
-        {
-            Suit.Spade => "♠",
-            Suit.Heart => "♥",
-            Suit.Club => "♣",
-            Suit.Diamond => "♦",
-            _ => ""
-        };
-    }
-
     private void ToggleCardSelection(int index)
     {
-        if (SelectedCardIndices.Contains(index))
-        {
-            SelectedCardIndices.Remove(index);
-            LogUiCardSelect(PlayerHand[index], "deselect");
-        }
-        else
-        {
-            SelectedCardIndices.Add(index);
-            LogUiCardSelect(PlayerHand[index], "select");
-        }
+        if (index < 0 || index >= Vm.PlayerHand.Count)
+            return;
+
+        bool deselect = Vm.SelectedCardIndices.Contains(index);
+        PlayerActionService.ToggleSelection(Vm, index);
+        UiTelemetryService.LogCardSelect(game, GetNormalizedPhase(), Vm.PlayerHand[index], Vm.SelectedCardIndices.Count, deselect ? "deselect" : "select");
     }
 
     private List<Card> GetSelectedCards()
     {
-        return SelectedCardIndices.OrderBy(i => i).Select(i => PlayerHand[i]).ToList();
+        return PlayerActionService.GetSelectedCards(Vm);
     }
 
     private GameConfig BuildCurrentConfig()
@@ -491,11 +290,7 @@
         if (game == null)
             return new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Spade };
 
-        return new GameConfig
-        {
-            LevelRank = game.State.LevelRank,
-            TrumpSuit = game.State.TrumpSuit
-        };
+        return GameSessionService.BuildCurrentConfig(game);
     }
 
     private AIRole GetRoleForPlayer(int playerIndex)
@@ -503,31 +298,23 @@
         if (game == null)
             return AIRole.Opponent;
 
-        if (playerIndex == game.State.DealerIndex)
-            return AIRole.Dealer;
-
-        return playerIndex % 2 == game.State.DealerIndex % 2 ? AIRole.DealerPartner : AIRole.Opponent;
+        return GameSessionService.GetRoleForPlayer(game, playerIndex);
     }
 
     private List<Card> GetCurrentWinningCards()
     {
-        if (game == null || game.CurrentTrick.Count == 0)
+        if (game == null)
             return new List<Card>();
 
-        var judge = new TrickJudge(BuildCurrentConfig());
-        int winner = judge.DetermineWinner(game.CurrentTrick);
-        var winnerPlay = game.CurrentTrick.FirstOrDefault(p => p.PlayerIndex == winner);
-        return winnerPlay != null ? new List<Card>(winnerPlay.Cards) : new List<Card>(game.CurrentTrick[0].Cards);
+        return GameSessionService.GetCurrentWinningCards(game);
     }
 
     private bool IsPartnerWinning(int playerIndex)
     {
-        if (game == null || game.CurrentTrick.Count == 0)
+        if (game == null)
             return false;
 
-        var judge = new TrickJudge(BuildCurrentConfig());
-        int winner = judge.DetermineWinner(game.CurrentTrick);
-        return winner != playerIndex && winner % 2 == playerIndex % 2;
+        return GameSessionService.IsPartnerWinning(game, playerIndex);
     }
 
     private object[] SerializeCards(IEnumerable<Card> cards)
@@ -555,113 +342,31 @@
         if (game == null)
             return false;
 
-        int actionId = ++_actionCounter;
-        int defenderScoreBefore = game.State.DefenderScore;
-        var trickSnapshot = game.CurrentTrick.Select(p => new TrickPlay(p.PlayerIndex, new List<Card>(p.Cards))).ToList();
-        int trickIndex = _trickNumber + 1;
-        int trickPosition = trickSnapshot.Count + 1;
-        bool isLastPlayer = trickSnapshot.Count == 3;
-
-        // 第4家出牌前先缓存完整4手，避免核心层结算后立即清空导致看不到最后一家
-        if (isLastPlayer)
-        {
-            _displayTrick = new List<TrickPlay>(trickSnapshot)
-            {
-                new TrickPlay(playerIndex, new List<Card>(cards))
-            };
-        }
-
-        bool success = game.PlayCards(playerIndex, cards);
-
-        if (!success)
-        {
-            if (isLastPlayer)
-                _displayTrick = null;
-
-            await PushTestEventAsync(new
-            {
-                type = "play_rejected",
-                actionId,
-                actor,
-                playerIndex,
-                trickIndex,
-                trickPosition,
-                cards = SerializeCards(cards),
-                phase = game.State.Phase.ToString(),
-                currentPlayer = game.State.CurrentPlayer
-            });
-            return false;
-        }
-
-        await PushTestEventAsync(new
-        {
-            type = "play",
-            actionId,
-            actor,
+        return await TurnPlayService.PlayAndTraceAsync(
+            game,
             playerIndex,
-            trickIndex,
-            trickPosition,
-            cards = SerializeCards(cards),
-            leadCards = trickSnapshot.Count > 0 ? SerializeCards(trickSnapshot[0].Cards) : Array.Empty<object>(),
-            defenderScoreBefore,
-            defenderScoreAfter = game.State.DefenderScore
-        });
-
-        // 4家都出完，记录墩结算事件
-        if (trickSnapshot.Count == 3)
-        {
-            _trickNumber++;
-
-            var completedTrick = trickSnapshot
-                .Concat(new[] { new TrickPlay(playerIndex, new List<Card>(cards)) })
-                .ToList();
-
-            int trickScore = completedTrick.Sum(p => p.Cards.Sum(c => c.Score));
-            int winner = game.State.CurrentPlayer;
-            int defenderScoreAfter = game.State.DefenderScore;
-
-            await PushTestEventAsync(new
+            cards,
+            actor,
+            () => ++_actionCounter,
+            () => _trickNumber,
+            value => _trickNumber = value,
+            trick => _displayTrick = trick,
+            SerializeCards,
+            SerializePlays,
+            PushTestEventAsync,
+            async () =>
             {
-                type = "trick_end",
-                trickIndex = _trickNumber,
-                winner,
-                trickScore,
-                defenderScoreBefore,
-                defenderScoreAfter,
-                defenderScoreDelta = defenderScoreAfter - defenderScoreBefore,
-                plays = SerializePlays(completedTrick)
+                UpdateUI();
+                await InvokeAsync(StateHasChanged);
             });
-        }
-
-        if (game.State.Phase == GamePhase.Finished)
-        {
-            await PushTestEventAsync(new
-            {
-                type = "game_finished",
-                defenderScore = game.State.DefenderScore,
-                trickCount = _trickNumber
-            });
-        }
-
-        UpdateUI();
-        StateHasChanged();
-
-        if (isLastPlayer)
-        {
-            await Task.Delay(1500);
-            _displayTrick = null;
-            StateHasChanged();
-        }
-
-        return true;
     }
 
     private async Task PlayCards()
     {
-        if (game == null || SelectedCardIndices.Count == 0)
+        if (game == null || Vm.SelectedCardIndices.Count == 0)
             return;
 
-        LogUiActionClick("btn-play", CanPlay);
+        UiTelemetryService.LogActionClick(game, GetNormalizedPhase(), "btn-play", CanPlay);
         var selected = GetSelectedCards();
         bool success = await PlayCardsAndTraceAsync(0, selected, "human");
         if (!success)
@@ -670,7 +375,7 @@
             return;
         }
 
-        SelectedCardIndices.Clear();
+        Vm.SelectedCardIndices.Clear();
         UpdateUI();
 
         // 如果是AI的回合，自动出牌
@@ -686,48 +391,17 @@
         if (game == null)
             return;
 
-        while (game.State.CurrentPlayer != 0 && game.State.Phase == GamePhase.Playing)
-        {
-            int aiPlayer = game.State.CurrentPlayer;
-            var aiHand = new List<Card>(game.State.PlayerHands[aiPlayer]);
-            var role = GetRoleForPlayer(aiPlayer);
-
-            // 使用AI决策
-            var aiPlayerObj = new AIPlayer(
-                BuildCurrentConfig(),
-                AIDifficulty.Medium,
-                CurrentSeed + aiPlayer + _actionCounter
-            );
-
-            List<Card> aiCards;
-            if (game.CurrentTrick.Count == 0)
-            {
-                // AI首出
-                aiCards = aiPlayerObj.Lead(aiHand, role);
-            }
-            else
-            {
-                // AI跟牌
-                aiCards = aiPlayerObj.Follow(
-                    aiHand,
-                    game.CurrentTrick[0].Cards,
-                    GetCurrentWinningCards(),
-                    role,
-                    IsPartnerWinning(aiPlayer));
-            }
-
-            bool isLastPlayer = game.CurrentTrick.Count == 3;
-            bool success = await PlayCardsAndTraceAsync(aiPlayer, aiCards, "ai");
-            if (!success)
-            {
-                ShowMessage($"AI {aiPlayer} 出牌失败");
-                await PushTestEventAsync(new { type = "ai_play_failed", playerIndex = aiPlayer });
-                break;
-            }
-
-            if (!isLastPlayer)
-                await Task.Delay(450); // 普通AI出牌间隔
-        }
+        await AITurnService.RunUntilHumanTurnAsync(
+            game,
+            CurrentSeed,
+            () => _actionCounter,
+            BuildCurrentConfig,
+            GetRoleForPlayer,
+            GetCurrentWinningCards,
+            IsPartnerWinning,
+            PlayCardsAndTraceAsync,
+            PushTestEventAsync,
+            ShowMessage);
 
         // 检查游戏是否结束
         if (game.State.Phase == GamePhase.Finished)
@@ -736,8 +410,8 @@
 
     private async Task BuryCards()
     {
-        LogUiActionClick("btn-bury", game != null && SelectedCardIndices.Count == 8);
-        if (game == null || SelectedCardIndices.Count != 8)
+        UiTelemetryService.LogActionClick(game, GetNormalizedPhase(), "btn-bury", game != null && Vm.SelectedCardIndices.Count == 8);
+        if (game == null || Vm.SelectedCardIndices.Count != 8)
         {
             ShowMessage("请选择8张牌扣底");
             return;
@@ -758,33 +432,32 @@
             cards = SerializeCards(cardsToBury)
         });
 
-        SelectedCardIndices.Clear();
+        Vm.SelectedCardIndices.Clear();
         UpdateUI();
         ShowMessage("扣底成功，开始出牌");
     }
 
     private Task ViewBottom()
     {
-        LogUiActionClick("btn-view-bottom", true);
+        UiTelemetryService.LogActionClick(game, GetNormalizedPhase(), "btn-view-bottom", true);
         ShowMessage("底牌功能待实现");
         return Task.CompletedTask;
     }
 
     private Task ViewLastTrick()
     {
-        LogUiActionClick("btn-history", true);
+        UiTelemetryService.LogActionClick(game, GetNormalizedPhase(), "btn-history", true);
         ShowMessage("上一轮牌功能待实现");
         return Task.CompletedTask;
     }
 
     private async Task BidTrump(Suit suit)
     {
-        LogUiActionClick($"bid-{suit.ToString().ToLowerInvariant()}", CanBid(suit));
+        UiTelemetryService.LogActionClick(game, GetNormalizedPhase(), $"bid-{suit.ToString().ToLowerInvariant()}", CanBid(suit));
         if (game == null || game.State.Phase != GamePhase.Bidding)
             return;
 
-        // 查找玩家手中的级牌
-        var levelCards = PlayerHand.Where(c => c.Rank == game.State.LevelRank && c.Suit == suit).ToList();
+        var levelCards = PlayerActionService.GetBidLevelCards(game, Vm, suit);
 
         if (levelCards.Count == 0)
         {
@@ -809,7 +482,7 @@
             cards = SerializeCards(bidCards)
         });
 
-        ShowMessage($"亮主成功：{GetSuitSymbol(suit)}");
+        ShowMessage($"亮主成功：{GameSessionService.GetSuitSymbol(suit)}");
 
         // 延迟后确定主花色并进入扣底阶段
         await Task.Delay(350);
@@ -868,8 +541,7 @@
         if (game == null || game.State.Phase != GamePhase.Bidding)
             return false;
 
-        // 检查是否有该花色的级牌
-        return PlayerHand.Any(c => c.Rank == game.State.LevelRank && c.Suit == suit);
+        return PlayerActionService.CanBid(game, Vm, suit);
     }
 
     private List<Card> GetPlayedCards(int playerIndex)
@@ -896,7 +568,7 @@
 
     private Task ToggleSettings()
     {
-        LogUiActionClick("btn-settings", true);
+        UiTelemetryService.LogActionClick(game, GetNormalizedPhase(), "btn-settings", true);
         // TODO: 显示设置菜单
         return Task.CompletedTask;
     }
@@ -909,35 +581,24 @@
         if (game.State.Phase != GamePhase.Playing || game.State.CurrentPlayer != 0)
             return;
 
-        var ai = new AIPlayer(BuildCurrentConfig(), AIDifficulty.Hard, CurrentSeed + _actionCounter + 5000);
-        var role = GetRoleForPlayer(0);
-
-        List<Card> selected;
-        if (game.CurrentTrick.Count == 0)
+        Vm.SelectedCardIndices.Clear();
+        var selectedIndices = UiTestActionService.BuildAutoPlaySelection(
+            game,
+            Vm,
+            CurrentSeed,
+            _actionCounter,
+            BuildCurrentConfig(),
+            GetRoleForPlayer(0),
+            GetCurrentWinningCards(),
+            IsPartnerWinning(0));
+        foreach (var index in selectedIndices)
         {
-            selected = ai.Lead(new List<Card>(PlayerHand), role);
-        }
-        else
-        {
-            selected = ai.Follow(
-                new List<Card>(PlayerHand),
-                game.CurrentTrick[0].Cards,
-                GetCurrentWinningCards(),
-                role,
-                IsPartnerWinning(0));
-        }
-
-        SelectedCardIndices.Clear();
-        foreach (var card in selected)
-        {
-            int index = PlayerHand.IndexOf(card);
-            if (index >= 0)
-                SelectedCardIndices.Add(index);
+            Vm.SelectedCardIndices.Add(index);
         }
         await PushTestEventAsync(new
         {
             type = "test_auto_select",
-            cards = SerializeCards(selected),
+            cards = SerializeCards(GetSelectedCards()),
             currentPlayer = 0,
             trickIndex = _trickNumber + 1
         });
@@ -953,21 +614,20 @@
         if (game.State.Phase != GamePhase.Burying || game.State.DealerIndex != 0)
             return;
 
-        var ai = new AIPlayer(BuildCurrentConfig(), AIDifficulty.Hard, CurrentSeed + 8000);
-        var selected = ai.BuryBottom(new List<Card>(PlayerHand));
-
-        SelectedCardIndices.Clear();
-        foreach (var card in selected)
+        Vm.SelectedCardIndices.Clear();
+        var selectedIndices = UiTestActionService.BuildAutoBurySelection(
+            Vm,
+            CurrentSeed,
+            BuildCurrentConfig());
+        foreach (var index in selectedIndices)
         {
-            int index = PlayerHand.IndexOf(card);
-            if (index >= 0)
-                SelectedCardIndices.Add(index);
+            Vm.SelectedCardIndices.Add(index);
         }
 
         await PushTestEventAsync(new
         {
             type = "test_auto_bury_select",
-            cards = SerializeCards(selected)
+            cards = SerializeCards(GetSelectedCards())
         });
 
         StateHasChanged();
@@ -978,11 +638,10 @@
         if (!IsUiTestMode || game == null)
             return;
 
-        if (game.State.Phase != GamePhase.Bidding)
-            return;
-
         var fallbackSuit = Suit.Spade;
-        game.FinalizeTrump(fallbackSuit);
+        bool forced = UiTestActionService.ForceFinalizeBid(game, fallbackSuit);
+        if (!forced)
+            return;
 
         await PushTestEventAsync(new
         {
@@ -1006,61 +665,8 @@
 
     private void ShowMessage(string msg)
     {
-        Message = msg;
-        LogUiToast(msg);
-        StateHasChanged();
-        _ = ClearMessageLaterAsync(msg);
-    }
-
-    private void LogUiActionClick(string controlId, bool enabled)
-    {
-        LogUiEvent("ui.action.click", new Dictionary<string, object?>
-        {
-            ["control_id"] = controlId,
-            ["enabled"] = enabled,
-            ["phase"] = GetNormalizedPhase()
-        });
-    }
-
-    private void LogUiCardSelect(Card card, string action)
-    {
-        LogUiEvent("ui.card.select", new Dictionary<string, object?>
-        {
-            ["card"] = new Dictionary<string, object?>
-            {
-                ["suit"] = card.Suit.ToString(),
-                ["rank"] = card.Rank.ToString(),
-                ["score"] = card.Score,
-                ["text"] = card.ToString()
-            },
-            ["selected_count"] = SelectedCardIndices.Count,
-            ["action"] = action
-        });
-    }
-
-    private void LogUiToast(string message)
-    {
-        LogUiEvent("ui.toast.show", new Dictionary<string, object?>
-        {
-            ["message_key"] = "runtime.toast",
-            ["message_text"] = message
-        });
-    }
-
-    private void LogUiEvent(string eventName, Dictionary<string, object?> payload, string level = LogLevels.Info)
-    {
-        _uiLogger.Log(new LogEntry
-        {
-            Category = LogCategories.Diag,
-            Level = level,
-            Event = eventName,
-            SessionId = game?.SessionId,
-            GameId = game?.GameId,
-            RoundId = game?.RoundId,
-            Phase = GetNormalizedPhase(),
-            Actor = "ui",
-            Payload = payload
-        });
+        MessageService.Show(msg);
+        UiTelemetryService.LogToast(game, GetNormalizedPhase(), msg);
     }
 
     private string GetNormalizedPhase()
@@ -1079,14 +685,4 @@
         };
     }
 
-    private async Task ClearMessageLaterAsync(string expectedMessage)
-    {
-        await Task.Delay(2000);
-
-        if (Message == expectedMessage)
-        {
-            Message = "";
-            await InvokeAsync(StateHasChanged);
-        }
-    }
 }

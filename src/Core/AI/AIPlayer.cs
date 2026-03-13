@@ -103,7 +103,7 @@ namespace TractorGame.Core.AI
         /// <param name="myPosition">我的位置（用于记牌评估）</param>
         /// <param name="opponentPositions">对手位置列表（用于甩牌评估）</param>
         public List<Card> Lead(List<Card> hand, AIRole role = AIRole.Opponent,
-            int myPosition = -1, List<int> opponentPositions = null)
+            int myPosition = -1, List<int>? opponentPositions = null)
         {
             if (hand == null || hand.Count == 0)
                 return new List<Card>();
@@ -140,7 +140,7 @@ namespace TractorGame.Core.AI
         /// <param name="role">AI角色</param>
         /// <param name="partnerWinning">对家是否当前赢牌</param>
         public List<Card> Follow(List<Card> hand, List<Card> leadCards,
-            List<Card> currentWinningCards = null,
+            List<Card>? currentWinningCards = null,
             AIRole role = AIRole.Opponent,
             bool partnerWinning = false)
         {
@@ -345,7 +345,7 @@ namespace TractorGame.Core.AI
         }
 
         private List<List<Card>> BuildLeadCandidates(List<Card> hand, CardComparer comparer, AIRole role,
-            int myPosition, List<int> opponentPositions)
+            int myPosition, List<int>? opponentPositions)
         {
             var groups = new List<List<Card>>();
 
@@ -408,7 +408,7 @@ namespace TractorGame.Core.AI
         /// 判断是否可以安全甩牌
         /// </summary>
         private bool CanSafelyThrow(List<Card> throwCards, List<Card> hand,
-            int myPosition, List<int> opponentPositions)
+            int myPosition, List<int>? opponentPositions)
         {
             // 简单难度：不评估，随机决定
             if (_difficulty == AIDifficulty.Easy)
@@ -644,7 +644,7 @@ namespace TractorGame.Core.AI
             return CanBeatCards(leadCards, followCards);
         }
 
-        private List<Card> FindStrongestPair(List<Card> cards, CardComparer comparer)
+        private List<Card>? FindStrongestPair(List<Card> cards, CardComparer comparer)
         {
             var groups = cards.GroupBy(c => (c.Suit, c.Rank))
                 .Where(g => g.Count() >= 2)
@@ -667,7 +667,7 @@ namespace TractorGame.Core.AI
         /// 查找最强拖拉机（优化版，避免组合爆炸）
         /// [P2修复] 使用贪心算法代替组合枚举，降低复杂度
         /// </summary>
-        private List<Card> FindStrongestTractor(List<Card> cards, int neededCount, CardComparer comparer)
+        private List<Card>? FindStrongestTractor(List<Card> cards, int neededCount, CardComparer comparer)
         {
             if (neededCount < 4 || neededCount % 2 != 0)
                 return null;

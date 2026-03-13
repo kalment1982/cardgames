@@ -10,8 +10,8 @@ namespace TractorGame.Core.GameFlow
     /// </summary>
     public class Deck
     {
-        private List<Card> _cards;
-        private Random _random;
+        private List<Card> _cards = new List<Card>();
+        private Random _random = new Random();
 
         public Deck()
         {

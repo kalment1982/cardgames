@@ -204,7 +204,8 @@ namespace TractorGame.Tests
             log.AppendLine("══════════════════════════════════════════════════════════════════");
 
             // 写文件
-            var path = "/Users/karmy/Projects/CardGame/tractor/unittest/self/campaign_simulation.txt";
+            var path = TestPathHelper.ResolveFromRepoRoot("unittest", "self", "campaign_simulation.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, log.ToString(), Encoding.UTF8);
             _output.WriteLine(log.ToString());
 
@@ -234,7 +235,7 @@ namespace TractorGame.Tests
         }
 
         // ── 辅助：选牌策略 ───────────────────────────────────────────────────
-        private static Card BestCard(List<Card> hand, Card leadCard,
+        private static Card BestCard(List<Card> hand, Card? leadCard,
             GameConfig config, CardComparer comparer, bool isLead)
         {
             if (isLead)
@@ -242,6 +243,8 @@ namespace TractorGame.Tests
                 // 首家：出最大牌
                 return hand.OrderByDescending(c => c, comparer).First();
             }
+            if (leadCard == null)
+                return hand.OrderBy(c => c, comparer).First();
 
             // 跟牌
             string leadCat = GetCat(leadCard, config);

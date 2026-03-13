@@ -35,7 +35,7 @@ namespace TractorGame.Tests
             bool campaignOver = false;
 
             // 每局单独写一个 md 文件，另外写一个总览文件
-            var outDir = "/Users/karmy/Projects/CardGame/tractor/unittest/self/campaign_detail";
+            var outDir = TestPathHelper.ResolveFromRepoRoot("unittest", "self", "campaign_detail");
             Directory.CreateDirectory(outDir);
 
             var summary = new StringBuilder();
@@ -322,11 +322,13 @@ namespace TractorGame.Tests
             return cards;
         }
 
-        private static Card BestCard(List<Card> hand, Card leadCard,
+        private static Card BestCard(List<Card> hand, Card? leadCard,
             GameConfig config, CardComparer comparer, bool isLead)
         {
             if (isLead)
                 return hand.OrderByDescending(c => c, comparer).First();
+            if (leadCard == null)
+                return hand.OrderBy(c => c, comparer).First();
 
             string leadCat = GetCat(leadCard, config);
             var sameCat = hand.Where(c => GetCat(c, config) == leadCat).ToList();

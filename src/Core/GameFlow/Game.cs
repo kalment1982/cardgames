@@ -528,9 +528,14 @@ namespace TractorGame.Core.GameFlow
                 "system",
                 new Dictionary<string, object?>
                 {
+                    ["trick_no"] = _trickNo,
                     ["trick_cards"] = SerializePlays(trickSnapshot),
                     ["winner_index"] = winner,
-                    ["trick_score"] = score
+                    ["trick_score"] = score,
+                    ["defender_score_before"] = defenderBefore,
+                    ["defender_score_after"] = _state.DefenderScore,
+                    ["winner_basis"] = BuildWinnerBasis(trickSnapshot, winner),
+                    ["play_analysis"] = SerializeTrickAnalysis(trickSnapshot)
                 });
 
             // 保存最后一墩首张牌（用于抠底倍数计算）
@@ -636,17 +641,29 @@ namespace TractorGame.Core.GameFlow
 
         private void LogTurnStart(int currentPlayer, bool isLead)
         {
+            var payload = new Dictionary<string, object?>
+            {
+                ["current_player"] = currentPlayer,
+                ["is_lead"] = isLead,
+                ["lead_player"] = _trickLeader
+            };
+
+            if (isLead)
+            {
+                payload["trick_no"] = _trickNo;
+                payload["dealer_index"] = _state.DealerIndex;
+                payload["level_rank"] = _state.LevelRank.ToString();
+                payload["trump_suit"] = _state.TrumpSuit?.ToString() ?? Suit.Spade.ToString();
+                payload["defender_score"] = _state.DefenderScore;
+                payload["hands_before_trick"] = SerializeHandsSnapshot();
+            }
+
             LogEvent(
                 LogCategories.Audit,
                 LogLevels.Info,
                 "turn.start",
                 "system",
-                new Dictionary<string, object?>
-                {
-                    ["current_player"] = currentPlayer,
-                    ["is_lead"] = isLead,
-                    ["lead_player"] = _trickLeader
-                });
+                payload);
         }
 
         private void LogTrumpBidReject(int playerIndex, List<Card> cards, string reasonCode)
@@ -757,6 +774,93 @@ namespace TractorGame.Core.GameFlow
                 ["player_index"] = p.PlayerIndex,
                 ["cards"] = SerializeCards(p.Cards)
             }).ToList();
+        }
+
+        private List<Dictionary<string, object?>> SerializeHandsSnapshot()
+        {
+            var comparer = new CardComparer(_config);
+            var result = new List<Dictionary<string, object?>>();
+
+            for (int i = 0; i < _state.PlayerHands.Length; i++)
+            {
+                var sorted = _state.PlayerHands[i]
+                    .OrderByDescending(c => c, comparer)
+                    .ToList();
+
+                result.Add(new Dictionary<string, object?>
+                {
+                    ["player_index"] = i,
+                    ["hand_count"] = sorted.Count,
+                    ["cards"] = SerializeCards(sorted)
+                });
+            }
+
+            return result;
+        }
+
+        private List<Dictionary<string, object?>> SerializeTrickAnalysis(List<TrickPlay> plays)
+        {
+            var comparer = new CardComparer(_config);
+
+            return plays.Select(p =>
+            {
+                var category = _config.GetCardCategory(p.Cards[0]).ToString();
+                var pattern = new CardPattern(p.Cards, _config).Type.ToString();
+                var topCard = p.Cards.OrderByDescending(c => c, comparer).FirstOrDefault();
+                return new Dictionary<string, object?>
+                {
+                    ["player_index"] = p.PlayerIndex,
+                    ["category"] = category,
+                    ["pattern"] = pattern,
+                    ["top_card"] = topCard?.ToString() ?? string.Empty,
+                    ["cards_score"] = p.Cards.Sum(c => c.Score)
+                };
+            }).ToList();
+        }
+
+        private Dictionary<string, object?> BuildWinnerBasis(List<TrickPlay> plays, int winnerIndex)
+        {
+            if (plays.Count == 0)
+                return new Dictionary<string, object?> { ["reason"] = "empty_trick" };
+
+            var comparer = new CardComparer(_config);
+            var lead = plays[0];
+            var winner = plays.FirstOrDefault(p => p.PlayerIndex == winnerIndex) ?? lead;
+
+            var leadCategory = _config.GetCardCategory(lead.Cards[0]).ToString();
+            var winnerCategory = _config.GetCardCategory(winner.Cards[0]).ToString();
+            var leadPattern = new CardPattern(lead.Cards, _config).Type.ToString();
+            var winnerPattern = new CardPattern(winner.Cards, _config).Type.ToString();
+
+            var leadTop = lead.Cards.OrderByDescending(c => c, comparer).FirstOrDefault();
+            var winnerTop = winner.Cards.OrderByDescending(c => c, comparer).FirstOrDefault();
+
+            string reason;
+            if (!string.Equals(leadCategory, winnerCategory, StringComparison.Ordinal))
+            {
+                reason = $"{winnerCategory} over {leadCategory}";
+            }
+            else if (!string.Equals(leadPattern, winnerPattern, StringComparison.Ordinal))
+            {
+                reason = $"pattern {winnerPattern} over {leadPattern}";
+            }
+            else
+            {
+                reason = $"{winnerTop} over {leadTop}";
+            }
+
+            return new Dictionary<string, object?>
+            {
+                ["lead_player_index"] = lead.PlayerIndex,
+                ["winner_player_index"] = winnerIndex,
+                ["lead_category"] = leadCategory,
+                ["winner_category"] = winnerCategory,
+                ["lead_pattern"] = leadPattern,
+                ["winner_pattern"] = winnerPattern,
+                ["lead_top_card"] = leadTop?.ToString() ?? string.Empty,
+                ["winner_top_card"] = winnerTop?.ToString() ?? string.Empty,
+                ["reason"] = reason
+            };
         }
 
         private static string GetBidType(List<Card> cards)

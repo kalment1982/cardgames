@@ -39,13 +39,13 @@ namespace TractorGame.Core.Models
             }
         }
 
-        public bool Equals(Card other)
+        public bool Equals(Card? other)
         {
             if (other == null) return false;
             return Suit == other.Suit && Rank == other.Rank;
         }
 
-        public override bool Equals(object obj) => Equals(obj as Card);
+        public override bool Equals(object? obj) => Equals(obj as Card);
 
         public override int GetHashCode() => HashCode.Combine(Suit, Rank);
 

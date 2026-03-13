@@ -61,7 +61,19 @@ namespace TractorGame.Core.Rules
                 return false;
 
             var throwComponents = DecomposeThrowComponents(throwCards);
-            return throwComponents.Any(component => CanBeatComponent(sameSuitCards, component));
+            if (throwComponents.Count == 0)
+                return false;
+
+            // 混甩按主导结构判挡：拖拉机 > 对子 > 单张
+            // 例如「AA + 单张」只比较对子能否被压制，忽略单张比较。
+            var dominantType = throwComponents
+                .OrderBy(component => GetComponentPriority(component.Type))
+                .ThenByDescending(component => component.PairCount)
+                .First()
+                .Type;
+
+            var dominantComponents = throwComponents.Where(component => component.Type == dominantType).ToList();
+            return dominantComponents.Any(component => CanBeatComponent(sameSuitCards, component));
         }
 
         /// <summary>
@@ -325,6 +337,16 @@ namespace TractorGame.Core.Rules
             }
 
             return count;
+        }
+
+        private static int GetComponentPriority(ThrowComponentType type)
+        {
+            return type switch
+            {
+                ThrowComponentType.Tractor => 0,
+                ThrowComponentType.Pair => 1,
+                _ => 2
+            };
         }
 
         private bool IsSameSuitOrTrump(List<Card> cards)
