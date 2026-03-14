@@ -25,3 +25,8 @@ TestResults/
 
 # Logs
 *.log
+
+# Training outputs
+data/
+logs/raw/
+logs/replay/
