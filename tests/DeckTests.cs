@@ -51,7 +51,10 @@ namespace TractorGame.Tests
         {
             var deck = new Deck(1);
             var dealing = new DealingPhase(deck);
-            dealing.Deal();
+            while (!dealing.IsComplete)
+            {
+                dealing.DealNext();
+            }
 
             for (int i = 0; i < 4; i++)
             {
@@ -64,7 +67,10 @@ namespace TractorGame.Tests
         {
             var deck = new Deck(1);
             var dealing = new DealingPhase(deck);
-            dealing.Deal();
+            while (!dealing.IsComplete)
+            {
+                dealing.DealNext();
+            }
 
             Assert.Equal(8, dealing.GetBottomCards().Count);
         }
@@ -74,7 +80,10 @@ namespace TractorGame.Tests
         {
             var deck = new Deck(1);
             var dealing = new DealingPhase(deck);
-            dealing.Deal();
+            while (!dealing.IsComplete)
+            {
+                dealing.DealNext();
+            }
 
             var allCards = new List<Card>();
             for (int i = 0; i < 4; i++)

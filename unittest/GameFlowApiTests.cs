@@ -61,7 +61,10 @@ namespace TractorGame.Tests
         public void Deal_DistributesCorrectCounts()
         {
             var dealing = new DealingPhase(new Deck(7));
-            dealing.Deal();
+            while (!dealing.IsComplete)
+            {
+                dealing.DealNext();
+            }
 
             int total = 0;
             for (int i = 0; i < 4; i++)
@@ -236,9 +239,10 @@ namespace TractorGame.Tests
             game.StartGame();
 
             Assert.Equal(GamePhase.Bidding, game.State.Phase);
+            Assert.False(game.IsDealingComplete);
             for (int i = 0; i < 4; i++)
             {
-                Assert.Equal(25, game.State.PlayerHands[i].Count);
+                Assert.Equal(0, game.State.PlayerHands[i].Count);
             }
         }
 
@@ -257,6 +261,7 @@ namespace TractorGame.Tests
         {
             var game = new Game(1);
             game.StartGame();
+            DealToEnd(game);
 
             var result = game.BidTrump(0, new List<Card> { new Card(Suit.Spade, Rank.Two) });
 
@@ -268,6 +273,7 @@ namespace TractorGame.Tests
         {
             var game = new Game(1);
             game.StartGame();
+            DealToEnd(game);
 
             game.FinalizeTrump(Suit.Heart);
 
@@ -280,6 +286,7 @@ namespace TractorGame.Tests
         {
             var game = new Game(1);
             game.StartGame();
+            DealToEnd(game);
 
             game.FinalizeTrump();
 
@@ -292,6 +299,7 @@ namespace TractorGame.Tests
         {
             var game = new Game(3);
             game.StartGame();
+            DealToEnd(game);
             game.FinalizeTrump(Suit.Club);
 
             var cardsToBury = game.State.PlayerHands[0].Take(8).ToList();
@@ -346,6 +354,15 @@ namespace TractorGame.Tests
             var play = new List<Card> { new Card(Suit.Spade, Rank.Ace) };
 
             Assert.False(game.PlayCards(0, play));
+        }
+
+        private static void DealToEnd(Game game)
+        {
+            while (!game.IsDealingComplete)
+            {
+                var step = game.DealNextCardEx();
+                Assert.True(step.Success);
+            }
         }
 
         [Fact]

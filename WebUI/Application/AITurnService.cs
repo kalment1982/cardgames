@@ -27,10 +27,13 @@ public sealed class AITurnService
             var aiHand = new List<Card>(game.State.PlayerHands[aiPlayer]);
             var role = getRoleForPlayer(aiPlayer);
 
+            // 使用训练好的Champion参数
+            var championParams = ChampionLoader.LoadChampion();
             var aiPlayerObj = new AIPlayer(
                 buildCurrentConfig(),
-                AIDifficulty.Medium,
-                currentSeed + aiPlayer + getActionCounter()
+                AIDifficulty.Hard,  // 使用Hard难度（会被championParams覆盖）
+                currentSeed + aiPlayer + getActionCounter(),
+                championParams  // 传入训练好的参数
             );
 
             List<Card> aiCards = game.CurrentTrick.Count == 0

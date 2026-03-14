@@ -55,8 +55,15 @@ public sealed class UiTestActionService
         if (game.State.Phase != GamePhase.Bidding)
             return false;
 
-        game.FinalizeTrump(fallbackSuit);
-        return true;
+        while (!game.IsDealingComplete)
+        {
+            var dealResult = game.DealNextCardEx();
+            if (!dealResult.Success)
+                return false;
+        }
+
+        var finalizeResult = game.FinalizeTrumpEx(fallbackSuit);
+        return finalizeResult.Success;
     }
 
     private static bool IsSelectionValid(Game game, List<Card> hand, List<Card> selected)

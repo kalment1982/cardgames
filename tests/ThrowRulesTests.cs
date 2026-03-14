@@ -98,6 +98,7 @@ namespace TractorGame.Tests
         {
             var game = new Game(seed: 1);
             game.StartGame();
+            DealToEnd(game);
             game.FinalizeTrump(Suit.Spade);
 
             var dealerCardsToBury = game.State.PlayerHands[0].Take(8).ToList();
@@ -143,6 +144,15 @@ namespace TractorGame.Tests
             Assert.Equal(4, game.State.PlayerHands[0].Count);
             Assert.Contains(new Card(Suit.Heart, Rank.Ten), game.State.PlayerHands[0]);
             Assert.Equal(1, game.State.CurrentPlayer);
+        }
+
+        private static void DealToEnd(Game game)
+        {
+            while (!game.IsDealingComplete)
+            {
+                var step = game.DealNextCardEx();
+                Assert.True(step.Success);
+            }
         }
     }
 }

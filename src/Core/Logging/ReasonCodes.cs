@@ -16,6 +16,8 @@ namespace TractorGame.Core.Logging
         public const string FollowTractorRequired = "FOLLOW_TRACTOR_REQUIRED";
         public const string BidNotLevelCard = "BID_NOT_LEVEL_CARD";
         public const string BidPriorityTooLow = "BID_PRIORITY_TOO_LOW";
+        public const string DealingNotComplete = "DEALING_NOT_COMPLETE";
+        public const string DealingAlreadyComplete = "DEALING_ALREADY_COMPLETE";
         public const string BuryNot8Cards = "BURY_NOT_8_CARDS";
         public const string BuryCardNotFound = "BURY_CARD_NOT_FOUND";
         public const string AiNoValidCandidate = "AI_NO_VALID_CANDIDATE";

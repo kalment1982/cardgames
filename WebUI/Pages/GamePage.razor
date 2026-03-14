@@ -50,17 +50,30 @@ else
         </div>
     </div>
 
+    @if (_isDealingBiddingAnimation)
+    {
+        <div class="deal-rhythm-panel" data-testid="deal-rhythm-panel">
+            <div class="deal-rhythm-title">发牌竞叫中</div>
+            <div class="deal-rhythm-row">第 @_dealingRound / 25 轮 · @GetPlayerLabel(_dealingActivePlayer)摸牌</div>
+            <div class="deal-rhythm-row bid">@_biddingAnimationText</div>
+        </div>
+    }
+
     <!-- 玩家位置 -->
     <div class="player-north">
-        <div class="player-avatar">👤 北</div>
+        <div class="player-avatar @GetPlayerAvatarClass(2)">👤 北 @GetPlayerDealProgress(2)</div>
     </div>
 
     <div class="player-west">
-        <div class="player-avatar">👤 西</div>
+        <div class="player-avatar @GetPlayerAvatarClass(3)">👤 西 @GetPlayerDealProgress(3)</div>
     </div>
 
     <div class="player-east">
-        <div class="player-avatar">👤 东</div>
+        <div class="player-avatar @GetPlayerAvatarClass(1)">👤 东 @GetPlayerDealProgress(1)</div>
+    </div>
+
+    <div class="player-south">
+        <div class="player-avatar @GetPlayerAvatarClass(0)">👤 南 @GetPlayerDealProgress(0)</div>
     </div>
 
     <!-- 出牌显示区 -->
@@ -108,17 +121,18 @@ else
     @if (Vm.ShowBiddingPanel)
     {
         <div class="bidding-panel" data-testid="bidding-panel">
-            <button class="suit-btn @(CanBid(Suit.Joker) ? "active" : "")" data-testid="bid-joker" @onclick="() => BidTrump(Suit.Joker)">🃏</button>
-            <button class="suit-btn @(CanBid(Suit.Spade) ? "active" : "")" data-testid="bid-spade" @onclick="() => BidTrump(Suit.Spade)">♠</button>
-            <button class="suit-btn @(CanBid(Suit.Heart) ? "active" : "")" data-testid="bid-heart" @onclick="() => BidTrump(Suit.Heart)">♥</button>
-            <button class="suit-btn @(CanBid(Suit.Club) ? "active" : "")" data-testid="bid-club" @onclick="() => BidTrump(Suit.Club)">♣</button>
-            <button class="suit-btn @(CanBid(Suit.Diamond) ? "active" : "")" data-testid="bid-diamond" @onclick="() => BidTrump(Suit.Diamond)">♦</button>
+            <button class="suit-btn @(CanBid(Suit.Joker) ? "active" : "")" data-testid="bid-joker" @onclick="() => BidTrump(Suit.Joker)" disabled="@_isDealingBiddingAnimation">🃏</button>
+            <button class="suit-btn @(CanBid(Suit.Spade) ? "active" : "")" data-testid="bid-spade" @onclick="() => BidTrump(Suit.Spade)" disabled="@_isDealingBiddingAnimation">♠</button>
+            <button class="suit-btn @(CanBid(Suit.Heart) ? "active" : "")" data-testid="bid-heart" @onclick="() => BidTrump(Suit.Heart)" disabled="@_isDealingBiddingAnimation">♥</button>
+            <button class="suit-btn @(CanBid(Suit.Club) ? "active" : "")" data-testid="bid-club" @onclick="() => BidTrump(Suit.Club)" disabled="@_isDealingBiddingAnimation">♣</button>
+            <button class="suit-btn @(CanBid(Suit.Diamond) ? "active" : "")" data-testid="bid-diamond" @onclick="() => BidTrump(Suit.Diamond)" disabled="@_isDealingBiddingAnimation">♦</button>
+            <button class="suit-btn bid-auto-btn" data-testid="bid-auto" @onclick="AutoFinalizeBidFromButton" disabled="@_isDealingBiddingAnimation">自动定主</button>
         </div>
     }
 
     <!-- 手牌区 -->
     <div class="hand-area" data-testid="hand-area">
-        @foreach (var (card, index) in Vm.PlayerHand.Select((c, i) => (c, i)))
+        @foreach (var (card, index) in GetVisibleHandCards().Select((c, i) => (c, i)))
         {
             <img src="@GetCardImage(card)"
                  class="hand-card @(Vm.SelectedCardIndices.Contains(index) ? "selected" : "")"
@@ -127,6 +141,13 @@ else
                  data-card-key="@($"{card.Suit}-{card.Rank}")"
                  @onclick="() => ToggleCardSelection(index)"
                  alt="@card" />
+        }
+        @if (_isDealingBiddingAnimation)
+        {
+            @for (var i = GetVisibleHandCards().Count; i < 25; i++)
+            {
+                <div class="hand-card-back" data-testid="hand-card-back"></div>
+            }
         }
     </div>
 
@@ -193,10 +214,17 @@ else
     private bool ShowNextRoundButton = false;
     private bool _roundTransitioning = false;
     private CancellationTokenSource? _roundTransitionCts;
+    private CancellationTokenSource? _dealingFlowCts;
     private bool IsAccessGranted = false;
     private string AccessInput = string.Empty;
     private string AccessError = string.Empty;
     private string AccessCode = "tractor80";
+    private bool _isDealingBiddingAnimation;
+    private int _dealingRound;
+    private int _dealingActivePlayer = -1;
+    private int _visibleHandCount = 25;
+    private string _biddingAnimationText = string.Empty;
+    private int _lastBidPlayer = -1;
 
     protected override void OnInitialized()
     {
@@ -219,6 +247,8 @@ else
         MessageService.Changed -= OnMessageChanged;
         _roundTransitionCts?.Cancel();
         _roundTransitionCts?.Dispose();
+        _dealingFlowCts?.Cancel();
+        _dealingFlowCts?.Dispose();
     }
 
     private void OnMessageChanged()
@@ -287,8 +317,17 @@ else
         _roundTransitionCts?.Cancel();
         _roundTransitionCts?.Dispose();
         _roundTransitionCts = null;
+        _dealingFlowCts?.Cancel();
+        _dealingFlowCts?.Dispose();
+        _dealingFlowCts = new CancellationTokenSource();
         ShowNextRoundButton = false;
         _roundTransitioning = false;
+        _isDealingBiddingAnimation = false;
+        _dealingRound = 0;
+        _dealingActivePlayer = -1;
+        _visibleHandCount = 0;
+        _biddingAnimationText = string.Empty;
+        _lastBidPlayer = -1;
 
         var session = GameSessionService.StartNewGame(ForcedSeed, _campaignDealerIndex, _campaignLevelRank);
         game = session.Game;
@@ -297,7 +336,8 @@ else
         _actionCounter = 0;
         Vm.SelectedCardIndices.Clear();
         UpdateUI();
-        ShowMessage("发牌完成，请亮主");
+        ShowMessage("开始发牌，进入竞叫阶段...");
+        _ = RunDealingBiddingFlowAsync();
     }
 
     private async Task InitializeTestHooksAsync()
@@ -326,6 +366,10 @@ else
             return;
 
         GameSessionService.UpdateViewModel(game, Vm);
+        if (!_isDealingBiddingAnimation || game.State.Phase != GamePhase.Bidding)
+        {
+            _visibleHandCount = Vm.PlayerHand.Count;
+        }
     }
 
     private string GetCardImage(Card card)
@@ -368,6 +412,9 @@ else
 
     private void ToggleCardSelection(int index)
     {
+        if (_isDealingBiddingAnimation)
+            return;
+
         if (index < 0 || index >= Vm.PlayerHand.Count)
             return;
 
@@ -664,6 +711,242 @@ else
         }
     }
 
+    private Task AutoFinalizeBidFromButton()
+    {
+        return AutoFinalizeBid(onlyWhenNoHumanOption: false);
+    }
+
+    private async Task RunDealingBiddingFlowAsync()
+    {
+        if (game == null || game.State.Phase != GamePhase.Bidding)
+            return;
+
+        var token = _dealingFlowCts?.Token ?? CancellationToken.None;
+        _isDealingBiddingAnimation = true;
+        _dealingRound = 0;
+        _dealingActivePlayer = -1;
+        _visibleHandCount = 0;
+        _biddingAnimationText = "准备发牌...";
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var levelRank = game.State.LevelRank;
+            var visibleHands = new[]
+            {
+                new List<Card>(),
+                new List<Card>(),
+                new List<Card>(),
+                new List<Card>()
+            };
+
+            string? lastBidInfo = null;
+            var dealDelayMs = IsUiTestMode ? 1 : 130;
+            var bidDelayMs = IsUiTestMode ? 1 : 240;
+            var bottomCount = 0;
+
+            while (!game.IsDealingComplete)
+            {
+                token.ThrowIfCancellationRequested();
+                var dealResult = game.DealNextCardEx();
+                if (!dealResult.Success)
+                {
+                    _biddingAnimationText = $"发牌失败：{dealResult.ReasonCode}";
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
+                var step = game.LastDealStep;
+                if (step == null)
+                    continue;
+
+                if (step.IsBottomCard)
+                {
+                    bottomCount++;
+                    _dealingActivePlayer = -1;
+                    _biddingAnimationText = $"底牌入底 {bottomCount}/8";
+                    await InvokeAsync(StateHasChanged);
+                    await Task.Delay(dealDelayMs, token);
+                    continue;
+                }
+
+                var player = step.PlayerIndex;
+                if (player < 0 || player >= visibleHands.Length)
+                    continue;
+
+                _dealingActivePlayer = player;
+                _dealingRound = Math.Max(_dealingRound, step.PlayerCardCount);
+                _biddingAnimationText = $"{GetPlayerLabel(player)} 摸牌（{step.PlayerCardCount}/25）";
+                visibleHands[player].Add(step.Card);
+
+                UpdateUI();
+                _visibleHandCount = Math.Min(GetDealtVisibleCardCountForSouth(), 25);
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(dealDelayMs, token);
+
+                var bidCards = BuildBidAttemptFromVisibleCards(player, visibleHands[player], levelRank, step.PlayerCardCount - 1);
+                if (bidCards.Count == 0)
+                    continue;
+
+                if (!game.BidTrump(player, bidCards))
+                    continue;
+
+                var suit = bidCards[0].Suit;
+                _lastBidPlayer = player;
+                lastBidInfo = $"P{player}亮{GameSessionService.GetSuitSymbol(suit)}({bidCards.Count}张级牌)";
+                _biddingAnimationText = $"竞叫：{GetPlayerLabel(player)} 亮{GameSessionService.GetSuitSymbol(suit)}";
+                await InvokeAsync(StateHasChanged);
+                await PushTestEventAsync(new
+                {
+                    type = "bid_trump",
+                    playerIndex = player,
+                    suit = suit.ToString(),
+                    cards = SerializeCards(bidCards),
+                    from_dealing = true,
+                    deal_round = _dealingRound
+                });
+                await Task.Delay(bidDelayMs, token);
+            }
+
+            if (game.State.Phase != GamePhase.Bidding)
+                return;
+
+            _dealingActivePlayer = -1;
+            if (lastBidInfo != null)
+                ShowMessage($"发牌竞叫完成：{lastBidInfo}");
+            else
+                ShowMessage("发牌竞叫完成：无人亮主，自动定主");
+
+            await AutoFinalizeBid(onlyWhenNoHumanOption: false);
+        }
+        catch (TaskCanceledException)
+        {
+            // Ignore canceled dealing animation when restarting game/round.
+        }
+        finally
+        {
+            _isDealingBiddingAnimation = false;
+            _dealingActivePlayer = -1;
+            if (game != null)
+                _visibleHandCount = Vm.PlayerHand.Count;
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private List<Card> BuildBidAttemptFromVisibleCards(int playerIndex, List<Card> visibleCards, Rank levelRank, int roundIndex)
+    {
+        if (game == null || visibleCards.Count == 0)
+            return new List<Card>();
+
+        var levelCardsBySuit = visibleCards
+            .Where(c => c.Rank == levelRank && c.Suit != Suit.Joker)
+            .GroupBy(c => c.Suit)
+            .Select(group => new { Suit = group.Key, Cards = group.ToList() })
+            .OrderByDescending(x => x.Cards.Count)
+            .ThenBy(x => x.Suit)
+            .ToList();
+
+        if (levelCardsBySuit.Count == 0)
+            return new List<Card>();
+
+        var best = levelCardsBySuit[0];
+        if (best.Cards.Count >= 2)
+            return best.Cards.Take(2).ToList();
+
+        var dealer = game.State.DealerIndex;
+        var dealerSide = playerIndex % 2 == dealer % 2;
+        var lateDeal = roundIndex >= 18;
+        if (dealerSide || lateDeal)
+            return best.Cards.Take(1).ToList();
+
+        return new List<Card>();
+    }
+
+    private int GetDealtVisibleCardCountForSouth()
+    {
+        return game?.State.PlayerHands[0].Count ?? 0;
+    }
+
+    private List<Card> GetVisibleHandCards()
+    {
+        if (_isDealingBiddingAnimation && game?.State.Phase == GamePhase.Bidding)
+            return Vm.PlayerHand.Take(Math.Clamp(_visibleHandCount, 0, Vm.PlayerHand.Count)).ToList();
+
+        return Vm.PlayerHand;
+    }
+
+    private string GetPlayerLabel(int playerIndex)
+    {
+        return playerIndex switch
+        {
+            0 => "南家",
+            1 => "东家",
+            2 => "北家",
+            3 => "西家",
+            _ => "未知"
+        };
+    }
+
+    private string GetPlayerAvatarClass(int playerIndex)
+    {
+        if (_dealingActivePlayer == playerIndex)
+            return "active";
+
+        if (_lastBidPlayer == playerIndex)
+            return "last-bid";
+
+        return string.Empty;
+    }
+
+    private string GetPlayerDealProgress(int playerIndex)
+    {
+        if (!_isDealingBiddingAnimation)
+            return string.Empty;
+
+        var dealt = game == null
+            ? 0
+            : Math.Clamp(game.State.PlayerHands[playerIndex].Count, 0, 25);
+        return $"({dealt}/25)";
+    }
+
+    private async Task AutoFinalizeBid(bool onlyWhenNoHumanOption)
+    {
+        if (game == null || game.State.Phase != GamePhase.Bidding)
+            return;
+
+        var humanCanBid = CanHumanBidAnySuit();
+        if (onlyWhenNoHumanOption && humanCanBid)
+            return;
+
+        var fallbackSuit = ResolveFallbackTrumpSuit(game);
+        var finalize = game.FinalizeTrumpEx(fallbackSuit);
+        if (!finalize.Success)
+        {
+            ShowMessage($"定主失败：{finalize.ReasonCode}");
+            return;
+        }
+
+        await PushTestEventAsync(new
+        {
+            type = "trump_finalized",
+            trumpSuit = fallbackSuit.ToString(),
+            dealerIndex = game.State.DealerIndex,
+            forced = true
+        });
+
+        UpdateUI();
+        if (game.State.DealerIndex == 0)
+        {
+            ShowMessage($"已自动定主：{GameSessionService.GetSuitSymbol(fallbackSuit)}，请扣底（选择8张牌）");
+        }
+        else
+        {
+            ShowMessage($"已自动定主：{GameSessionService.GetSuitSymbol(fallbackSuit)}，庄家扣底中...");
+            await AIBuryBottom();
+        }
+    }
+
     private async Task AIBuryBottom()
     {
         if (game == null)
@@ -672,10 +955,13 @@ else
         int dealer = game.State.DealerIndex;
         var dealerHand = new List<Card>(game.State.PlayerHands[dealer]);
 
+        // 使用训练好的Champion参数
+        var championParams = ChampionLoader.LoadChampion();
         var aiPlayer = new AIPlayer(
             BuildCurrentConfig(),
-            AIDifficulty.Medium,
-            CurrentSeed + dealer + 1000
+            AIDifficulty.Hard,
+            CurrentSeed + dealer + 1000,
+            championParams
         );
 
         var cardsToBury = aiPlayer.BuryBottom(dealerHand);
@@ -698,6 +984,45 @@ else
             return false;
 
         return PlayerActionService.CanBid(game, Vm, suit);
+    }
+
+    private bool CanHumanBidAnySuit()
+    {
+        if (game == null || game.State.Phase != GamePhase.Bidding)
+            return false;
+
+        return CanBid(Suit.Spade)
+               || CanBid(Suit.Heart)
+               || CanBid(Suit.Club)
+               || CanBid(Suit.Diamond)
+               || CanBid(Suit.Joker);
+    }
+
+    private static Suit ResolveFallbackTrumpSuit(Game game)
+    {
+        var levelRank = game.State.LevelRank;
+        var dealer = game.State.DealerIndex;
+        var suits = new[] { Suit.Spade, Suit.Heart, Suit.Club, Suit.Diamond };
+        var score = suits.ToDictionary(s => s, _ => 0);
+
+        // 优先考虑庄家手里的级牌花色，其次用全局级牌密度做兜底。
+        var dealerLevelCards = game.State.PlayerHands[dealer]
+            .Where(c => c.Rank == levelRank && c.Suit != Suit.Joker)
+            .ToList();
+        foreach (var card in dealerLevelCards)
+            score[card.Suit] += 3;
+
+        for (var i = 0; i < game.State.PlayerHands.Length; i++)
+        {
+            foreach (var card in game.State.PlayerHands[i].Where(c => c.Rank == levelRank && c.Suit != Suit.Joker))
+                score[card.Suit] += 1;
+        }
+
+        return score
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key)
+            .Select(kv => kv.Key)
+            .FirstOrDefault();
     }
 
     private List<Card> GetPlayedCards(int playerIndex)

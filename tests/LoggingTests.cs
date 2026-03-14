@@ -67,12 +67,22 @@ namespace TractorGame.Tests
         {
             var game = new Game(1);
             game.StartGame();
+            DealToEnd(game);
             game.FinalizeTrump(Suit.Spade);
 
             var result = game.BuryBottomEx(game.State.PlayerHands[0].Take(7).ToList());
 
             Assert.False(result.Success);
             Assert.Equal(ReasonCodes.BuryNot8Cards, result.ReasonCode);
+        }
+
+        private static void DealToEnd(Game game)
+        {
+            while (!game.IsDealingComplete)
+            {
+                var step = game.DealNextCardEx();
+                Assert.True(step.Success);
+            }
         }
     }
 }

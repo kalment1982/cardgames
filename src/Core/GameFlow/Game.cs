@@ -34,12 +34,15 @@ namespace TractorGame.Core.GameFlow
         private List<Card>? _lastTrickCards; // 最后一墩的牌（用于抠底计算）
         private int _trickNo;
         private int _turnNo;
+        private DealStepResult? _lastDealStep;
 
         public GameState State => _state;
         public List<TrickPlay> CurrentTrick => _currentTrick;
         public string SessionId => _sessionId;
         public string GameId => _gameId;
         public string RoundId => _roundId;
+        public bool IsDealingComplete => _dealing != null && _dealing.IsComplete;
+        public DealStepResult? LastDealStep => _lastDealStep;
 
         public Game(
             int seed = 0,
@@ -98,22 +101,15 @@ namespace TractorGame.Core.GameFlow
 
             // 发牌
             _dealing = new DealingPhase(_deck);
-            _dealing.Deal();
             for (int i = 0; i < 4; i++)
             {
-                _state.PlayerHands[i] = _dealing.GetPlayerHand(i);
+                _state.PlayerHands[i].Clear();
             }
-
-            LogEvent(
-                LogCategories.Audit,
-                LogLevels.Info,
-                "dealing.complete",
-                "system",
-                new Dictionary<string, object?>
-                {
-                    ["hands_count"] = _state.PlayerHands.Select(h => h.Count).ToArray(),
-                    ["bottom_count"] = _dealing.GetBottomCards().Count
-                });
+            _state.BuriedCards.Clear();
+            _state.TrumpSuit = null;
+            _state.DefenderScore = 0;
+            _state.CurrentPlayer = _state.DealerIndex;
+            _lastDealStep = null;
 
             var from = _state.Phase;
             _state.Phase = GamePhase.Bidding;
@@ -123,6 +119,55 @@ namespace TractorGame.Core.GameFlow
         public bool BidTrump(int playerIndex, List<Card> cards)
         {
             return BidTrumpEx(playerIndex, cards).Success;
+        }
+
+        public OperationResult DealNextCardEx()
+        {
+            if (_state.Phase != GamePhase.Bidding)
+                return OperationResult.Fail(ReasonCodes.PhaseInvalid);
+
+            if (_dealing == null)
+                return OperationResult.Fail(ReasonCodes.UnknownError);
+
+            if (_dealing.IsComplete)
+                return OperationResult.Fail(ReasonCodes.DealingAlreadyComplete);
+
+            var step = _dealing.DealNext();
+            _lastDealStep = step;
+            if (!step.IsBottomCard && step.PlayerIndex >= 0 && step.PlayerIndex < _state.PlayerHands.Length)
+            {
+                _state.PlayerHands[step.PlayerIndex].Add(step.Card);
+            }
+
+            LogEvent(
+                LogCategories.Audit,
+                LogLevels.Info,
+                "dealing.step",
+                step.IsBottomCard ? "system" : $"player_{step.PlayerIndex}",
+                new Dictionary<string, object?>
+                {
+                    ["step_index"] = step.StepIndex,
+                    ["is_bottom_card"] = step.IsBottomCard,
+                    ["player_index"] = step.IsBottomCard ? -1 : step.PlayerIndex,
+                    ["player_card_count"] = step.PlayerCardCount,
+                    ["remaining_deck"] = step.RemainingDeck
+                });
+
+            if (_dealing.IsComplete)
+            {
+                LogEvent(
+                    LogCategories.Audit,
+                    LogLevels.Info,
+                    "dealing.complete",
+                    "system",
+                    new Dictionary<string, object?>
+                    {
+                        ["hands_count"] = _state.PlayerHands.Select(h => h.Count).ToArray(),
+                        ["bottom_count"] = _dealing.GetBottomCards().Count
+                    });
+            }
+
+            return OperationResult.Ok;
         }
 
         public OperationResult BidTrumpEx(int playerIndex, List<Card> cards)
@@ -171,6 +216,17 @@ namespace TractorGame.Core.GameFlow
 
         public void FinalizeTrump(Suit? trumpSuit = null)
         {
+            FinalizeTrumpEx(trumpSuit);
+        }
+
+        public OperationResult FinalizeTrumpEx(Suit? trumpSuit = null)
+        {
+            if (_state.Phase != GamePhase.Bidding)
+                return OperationResult.Fail(ReasonCodes.PhaseInvalid);
+
+            if (!IsDealingComplete)
+                return OperationResult.Fail(ReasonCodes.DealingNotComplete);
+
             if (trumpSuit.HasValue)
             {
                 _state.TrumpSuit = trumpSuit;
@@ -187,7 +243,7 @@ namespace TractorGame.Core.GameFlow
             _config.TrumpSuit = _state.TrumpSuit;
 
             if (_dealing == null)
-                return;
+                return OperationResult.Fail(ReasonCodes.UnknownError);
 
             // 底牌加入庄家手牌（让庄家看到完整33张）
             var bottom = _dealing.GetBottomCards();
@@ -219,6 +275,8 @@ namespace TractorGame.Core.GameFlow
                     ["dealer_index"] = _state.DealerIndex,
                     ["dealer_hand_count_before_bottom"] = _state.PlayerHands[_state.DealerIndex].Count
                 });
+
+            return OperationResult.Ok;
         }
 
         public bool BuryBottom(List<Card> cardsToBury)

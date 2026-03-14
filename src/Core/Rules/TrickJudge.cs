@@ -68,10 +68,16 @@ namespace TractorGame.Core.Rules
         {
             var cat1 = _config.GetCardCategory(play1.Cards[0]);
             var cat2 = _config.GetCardCategory(play2.Cards[0]);
+            var pattern1 = new CardPattern(play1.Cards, _config).Type;
+            var pattern2 = new CardPattern(play2.Cards, _config).Type;
 
             // 主牌压副牌
             if (cat1 == CardCategory.Trump && cat2 == CardCategory.Suit)
-                return true;
+            {
+                // 结构约束：毙牌不能用更弱结构压更强结构
+                // 例如：副牌对子不能被主牌散牌（Mixed）压过
+                return GetPatternPriority(pattern1) >= GetPatternPriority(pattern2);
+            }
             if (cat1 == CardCategory.Suit && cat2 == CardCategory.Trump)
                 return false;
 

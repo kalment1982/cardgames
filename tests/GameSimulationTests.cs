@@ -16,6 +16,8 @@ namespace TractorGame.Tests
             // 发牌
             game.StartGame();
             Assert.Equal(GamePhase.Bidding, game.State.Phase);
+            DealToEnd(game);
+            Assert.True(game.IsDealingComplete);
             Assert.Equal(25, game.State.PlayerHands[0].Count);
             Assert.Equal(25, game.State.PlayerHands[1].Count);
             Assert.Equal(25, game.State.PlayerHands[2].Count);
@@ -40,6 +42,15 @@ namespace TractorGame.Tests
             Assert.True(playResult);
             Assert.Equal(24, game.State.PlayerHands[0].Count);
             Assert.Equal(1, game.State.CurrentPlayer);
+        }
+
+        private static void DealToEnd(Game game)
+        {
+            while (!game.IsDealingComplete)
+            {
+                var step = game.DealNextCardEx();
+                Assert.True(step.Success);
+            }
         }
     }
 }

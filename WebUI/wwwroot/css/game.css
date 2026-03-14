@@ -18,6 +18,37 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
+    z-index: 20;
+}
+
+.deal-rhythm-panel {
+    position: absolute;
+    top: 22px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.62);
+    color: #f8f9fa;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 10px;
+    padding: 10px 14px;
+    min-width: 250px;
+    z-index: 20;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+}
+
+.deal-rhythm-title {
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.deal-rhythm-row {
+    font-size: 14px;
+    opacity: 0.95;
+    line-height: 1.4;
+}
+
+.deal-rhythm-row.bid {
+    color: #f9d66e;
 }
 
 .settings-btn {
@@ -71,6 +102,13 @@
     transform: translateY(-50%);
 }
 
+.player-south {
+    position: absolute;
+    bottom: 192px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
 .player-avatar {
     background: rgba(0, 0, 0, 0.6);
     color: white;
@@ -79,6 +117,18 @@
     font-size: 14px;
     text-align: center;
     white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.player-avatar.active {
+    background: rgba(46, 204, 113, 0.35);
+    border: 1px solid rgba(46, 204, 113, 0.9);
+    box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.25);
+}
+
+.player-avatar.last-bid {
+    background: rgba(241, 196, 15, 0.35);
+    border: 1px solid rgba(241, 196, 15, 0.9);
 }
 
 /* 出牌显示区 */
@@ -199,6 +249,17 @@
     transition: all 0.2s;
 }
 
+.suit-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.bid-auto-btn {
+    width: 92px;
+    font-size: 14px;
+}
+
 .suit-btn.active {
     border-color: #F1C40F;
     background: rgba(241, 196, 15, 0.3);
@@ -235,6 +296,19 @@
     cursor: pointer;
     transition: all 0.2s ease-in-out;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.hand-card-back {
+    width: 60px;
+    height: 90px;
+    border-radius: 4px;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
+        repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0 6px, rgba(0, 0, 0, 0.08) 6px 12px),
+        #1e4f85;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.24);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    animation: dealReveal 0.18s ease-out;
 }
 
 .hand-card:hover {
@@ -334,9 +408,19 @@
     100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
 }
 
+@keyframes dealReveal {
+    0% { transform: translateY(-10px) scale(0.95); opacity: 0; }
+    100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
 /* 响应式设计 */
 @media (max-width: 1200px) {
     .hand-card {
+        width: 50px;
+        height: 75px;
+    }
+
+    .hand-card-back {
         width: 50px;
         height: 75px;
     }

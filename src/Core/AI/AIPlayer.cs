@@ -43,13 +43,19 @@ namespace TractorGame.Core.AI
         private readonly Random _random;
         private readonly AIDifficulty _difficulty;
         private readonly CardMemory _memory;
+        private readonly AIStrategyParameters _strategy;
 
-        public AIPlayer(GameConfig config, AIDifficulty difficulty = AIDifficulty.Medium, int seed = 0)
+        public AIPlayer(
+            GameConfig config,
+            AIDifficulty difficulty = AIDifficulty.Medium,
+            int seed = 0,
+            AIStrategyParameters? strategyParameters = null)
         {
             _config = config;
             _difficulty = difficulty;
             _random = seed > 0 ? new Random(seed) : new Random();
             _memory = new CardMemory(config);
+            _strategy = (strategyParameters ?? AIStrategyParameters.CreatePreset(difficulty)).Normalize();
         }
 
         /// <summary>
@@ -79,11 +85,11 @@ namespace TractorGame.Core.AI
         {
             return _difficulty switch
             {
-                AIDifficulty.Easy => 0.35,      // 35%随机
-                AIDifficulty.Medium => 0.20,    // 20%随机
-                AIDifficulty.Hard => 0.075,     // 7.5%随机
-                AIDifficulty.Expert => 0.025,   // 2.5%随机
-                _ => 0.20
+                AIDifficulty.Easy => _strategy.EasyRandomnessRate,
+                AIDifficulty.Medium => _strategy.MediumRandomnessRate,
+                AIDifficulty.Hard => _strategy.HardRandomnessRate,
+                AIDifficulty.Expert => _strategy.ExpertRandomnessRate,
+                _ => _strategy.MediumRandomnessRate
             };
         }
 
@@ -211,7 +217,10 @@ namespace TractorGame.Core.AI
                     var trumpCards = remaining.Where(_config.IsTrump)
                         .OrderByDescending(c => c, cardComparer)
                         .ToList();
-                    filler.AddRange(trumpCards.Take(missing));
+                    var cutPriority = ResolveRoleWeighted01(_strategy.FollowTrumpCutPriority, role, neutral: 0.6);
+                    var maxCuts = (int)System.Math.Ceiling(missing * cutPriority);
+                    if (maxCuts > 0)
+                        filler.AddRange(trumpCards.Take(System.Math.Min(missing, maxCuts)));
                 }
 
                 // 填充剩余
@@ -279,6 +288,21 @@ namespace TractorGame.Core.AI
         }
 
         /// <summary>
+        /// 计算赢牌余量（越小说明用最小的牌赢）
+        /// </summary>
+        private int CalculateWinMargin(List<Card> candidate, List<Card> currentWinning, CardComparer comparer)
+        {
+            int margin = 0;
+            for (int i = 0; i < candidate.Count && i < currentWinning.Count; i++)
+            {
+                int cmp = comparer.Compare(candidate[i], currentWinning[i]);
+                if (cmp > 0)
+                    margin += (GetCardValue(candidate[i]) - GetCardValue(currentWinning[i]));
+            }
+            return margin;
+        }
+
+        /// <summary>
         /// 扣底（坐庄玩家专属）
         /// 输入：手牌（推荐33张：25张手牌 + 8张底牌，但也支持其他数量）
         /// 输出：8张要扣底的牌
@@ -303,7 +327,9 @@ namespace TractorGame.Core.AI
                     Score = EvaluateCardForBurying(c, hand, comparer)
                 }).OrderBy(x => x.Score).ToList();
 
-                return cardScores.Take(8).Select(x => x.Card).ToList();
+                var selected = cardScores.Take(8).Select(x => x.Card).ToList();
+                ProtectPointCardsInBurySelection(selected, cardScores.Select(x => x.Card).ToList());
+                return selected;
             }
             else
             {
@@ -318,11 +344,13 @@ namespace TractorGame.Core.AI
         private int EvaluateCardForBurying(Card card, List<Card> hand, CardComparer comparer)
         {
             int score = 0;
+            var protectionWeight = _strategy.PointCardProtectionWeight;
+            var denyWeight = _strategy.OpponentDenyPointBias;
 
             // 1. 分牌惩罚（最不想埋）
             int points = GetCardPoints(card);
             if (points > 0)
-                score += 1000 + points * 100;
+                score += (int)System.Math.Round(1000 * protectionWeight + points * 100 * denyWeight);
 
             // 2. 主牌惩罚
             if (_config.IsTrump(card))
@@ -342,6 +370,34 @@ namespace TractorGame.Core.AI
             score += GetCardValue(card) / 10;
 
             return score;
+        }
+
+        /// <summary>
+        /// 在满足8张扣底前提下尽量避免埋分牌，优先替换为非分牌。
+        /// </summary>
+        private void ProtectPointCardsInBurySelection(List<Card> selected, List<Card> orderedCards)
+        {
+            if (selected.Count != 8)
+                return;
+
+            var selectedPointCards = selected.Where(c => GetCardPoints(c) > 0).ToList();
+            if (selectedPointCards.Count == 0)
+                return;
+
+            var replacements = orderedCards
+                .Where(c => GetCardPoints(c) == 0 && !selected.Contains(c))
+                .ToList();
+
+            foreach (var pointCard in selectedPointCards)
+            {
+                if (replacements.Count == 0)
+                    break;
+
+                var replacement = replacements[0];
+                replacements.RemoveAt(0);
+                selected.Remove(pointCard);
+                selected.Add(replacement);
+            }
         }
 
         private List<List<Card>> BuildLeadCandidates(List<Card> hand, CardComparer comparer, AIRole role,
@@ -369,11 +425,17 @@ namespace TractorGame.Core.AI
                 {
                     // 使用记牌系统评估甩牌成功率
                     bool canThrow = CanSafelyThrow(sorted, hand, myPosition, opponentPositions);
+                    var dealerThrowAggressiveness = Math.Min(1.0, _strategy.LeadThrowAggressiveness + 0.15);
 
                     if (canThrow)
                     {
                         // 甩牌成功率高，可以尝试
                         candidates.Add(sorted);
+                    }
+                    else if (isDealerSide && sorted.Count >= 4 && _random.NextDouble() < dealerThrowAggressiveness * 0.35)
+                    {
+                        // 庄家先手可适度激进，尝试中等规模甩牌以发挥底牌优势。
+                        candidates.Add(sorted.Take(4).ToList());
                     }
                     else if (!isDealerSide && sorted.Count >= 5)
                     {
@@ -566,41 +628,133 @@ namespace TractorGame.Core.AI
             // 对家赢牌时的策略
             if (partnerWinning)
             {
-                // 优先送分牌
+                // 1. 优先送分牌（使用细粒度参数）
                 int pointsA = a.Sum(c => GetCardPoints(c));
                 int pointsB = b.Sum(c => GetCardPoints(c));
                 if (pointsA != pointsB)
-                    return pointsA.CompareTo(pointsB);
+                {
+                    var givePriority = _strategy.PartnerWinning_GivePointsPriority;
+                    if (givePriority >= 0.5)
+                        return pointsA.CompareTo(pointsB); // 送分优先
+                }
 
-                // 其次出小牌
-                if (beatA != beatB)
-                    return beatA ? -1 : 1; // 不赢牌优先
+                // 2. 其次垫小牌（保留大牌）
+                var discardSmallPriority = _strategy.PartnerWinning_DiscardSmallPriority;
+                if (discardSmallPriority >= 0.5)
+                {
+                    int minValueA = a.Min(c => GetCardValue(c));
+                    int minValueB = b.Min(c => GetCardValue(c));
+                    if (minValueA != minValueB)
+                        return minValueA.CompareTo(minValueB); // 小牌优先
+                }
+
+                // 3. 避免垫主牌
+                var avoidTrumpPriority = _strategy.PartnerWinning_AvoidTrumpPriority;
+                if (avoidTrumpPriority >= 0.5)
+                {
+                    int trumpCountA = a.Count(_config.IsTrump);
+                    int trumpCountB = b.Count(_config.IsTrump);
+                    if (trumpCountA != trumpCountB)
+                        return trumpCountA.CompareTo(trumpCountB); // 少垫主牌
+                }
+
+                // 4. 保留对子
+                var keepPairsPriority = _strategy.PartnerWinning_KeepPairsPriority;
+                if (keepPairsPriority >= 0.5)
+                {
+                    int pairCountA = CountPairs(a);
+                    int pairCountB = CountPairs(b);
+                    if (pairCountA != pairCountB)
+                        return pairCountB.CompareTo(pairCountA); // 少垫对子
+                }
             }
             else
             {
                 // 对手赢牌时：优先争胜
                 if (beatA != beatB)
-                    return beatA ? 1 : -1;
+                {
+                    var beatBias = ResolveRoleWeighted01(_strategy.FollowBeatAttemptBias, role, neutral: 0.5);
+                    if (beatBias >= 0.5)
+                    {
+                        // 如果都能赢，选择"用最小牌赢"（保留大牌控制下轮）
+                        if (beatA && beatB)
+                        {
+                            var useMinimalPriority = _strategy.WinAttempt_UseMinimalCardsPriority;
+                            if (useMinimalPriority >= 0.5)
+                            {
+                                // 比较"赢牌余量"（越小越好）
+                                int marginA = CalculateWinMargin(a, currentWinningCards, comparer);
+                                int marginB = CalculateWinMargin(b, currentWinningCards, comparer);
+                                if (marginA != marginB)
+                                    return marginA.CompareTo(marginB); // 余量小的优先
+                            }
+                        }
+                        return beatA ? 1 : -1;
+                    }
 
-                // 无法赢时：庄家保留实力，闲家可以送分
+                    return beatA ? -1 : 1;
+                }
+
+                // 无法赢时：优先垫小牌和非分牌
                 if (!beatA && !beatB)
                 {
-                    if (isDealerSide)
+                    // 1. 优先垫非分牌
+                    var avoidPointsPriority = _strategy.CannotWin_AvoidPointsPriority;
+                    if (avoidPointsPriority >= 0.5)
                     {
-                        // 庄家：出小牌保留
-                        int cmpSmall = CompareCardSets(b, a, comparer); // 反向比较
-                        if (cmpSmall != 0)
-                            return cmpSmall;
-                    }
-                    else
-                    {
-                        // 闲家：可以送分牌（如果对手是庄家）
                         int pointsA = a.Sum(c => GetCardPoints(c));
                         int pointsB = b.Sum(c => GetCardPoints(c));
                         if (pointsA != pointsB)
-                            return pointsB.CompareTo(pointsA); // 不送分优先
+                            return pointsB.CompareTo(pointsA); // 少送分优先
+                    }
+
+                    // 2. 其次垫小牌
+                    var discardSmallPriority = _strategy.CannotWin_DiscardSmallPriority;
+                    if (discardSmallPriority >= 0.5)
+                    {
+                        int avgValueA = (int)a.Average(c => GetCardValue(c));
+                        int avgValueB = (int)b.Average(c => GetCardValue(c));
+                        if (avgValueA != avgValueB)
+                            return avgValueA.CompareTo(avgValueB); // 小牌优先
+                    }
+
+                    // 3. 避免垫主牌
+                    var avoidTrumpPriority = _strategy.CannotWin_AvoidTrumpPriority;
+                    if (avoidTrumpPriority >= 0.5)
+                    {
+                        int trumpCountA = a.Count(_config.IsTrump);
+                        int trumpCountB = b.Count(_config.IsTrump);
+                        if (trumpCountA != trumpCountB)
+                            return trumpCountA.CompareTo(trumpCountB); // 少垫主牌
+                    }
+
+                    // 4. 庄家额外保守
+                    if (isDealerSide)
+                    {
+                        int cmpSmall = CompareCardSets(b, a, comparer);
+                        if (cmpSmall != 0)
+                            return cmpSmall;
                     }
                 }
+            }
+
+            // 收官阶段优先稳健：在牌力接近时尽量保留高牌和主牌控制力。
+            var endgameStability = ResolveRoleWeighted01(_strategy.EndgameStabilityBias, role, neutral: 0.6);
+            if (endgameStability > 0.5)
+            {
+                var volatilityA = EstimateVolatility(a);
+                var volatilityB = EstimateVolatility(b);
+                if (volatilityA != volatilityB)
+                    return volatilityB.CompareTo(volatilityA);
+            }
+
+            var endgameFinish = ResolveRoleWeighted01(_strategy.EndgameFinishBias, role, neutral: 0.6);
+            if (endgameFinish > 0.6 && beatA && beatB)
+            {
+                var pointsA = a.Sum(GetCardPoints);
+                var pointsB = b.Sum(GetCardPoints);
+                if (pointsA != pointsB)
+                    return pointsA.CompareTo(pointsB);
             }
 
             int pa = GetPatternPriority(new CardPattern(a, _config).Type);
@@ -836,6 +990,27 @@ namespace TractorGame.Core.AI
                 .OrderBy(c => (int)c.Suit)
                 .ThenBy(c => (int)c.Rank)
                 .Select(c => $"{(int)c.Suit}-{(int)c.Rank}"));
+        }
+
+        private static double ResolveRoleWeighted01(double value, AIRole role, double neutral)
+        {
+            var clamped = System.Math.Clamp(value, 0, 1);
+            if (role == AIRole.Opponent)
+                return clamped;
+
+            // 非防守侧采用保守插值，避免参数过拟合影响庄家链路。
+            return neutral + (clamped - neutral) * 0.4;
+        }
+
+        private int EstimateVolatility(List<Card> cards)
+        {
+            if (cards == null || cards.Count == 0)
+                return 0;
+
+            var trumpWeight = cards.Count(_config.IsTrump) * 12;
+            var highCardWeight = cards.Sum(GetCardValue) / 60;
+            var pointRisk = cards.Sum(GetCardPoints) * 8;
+            return trumpWeight + highCardWeight + pointRisk;
         }
     }
 }

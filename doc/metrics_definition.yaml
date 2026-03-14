@@ -1,0 +1,544 @@
+# AI指标定义配置文件
+# 用于代码实现和自动化监控
+
+version: "1.0"
+last_updated: "2026-03-14"
+
+# ============================================
+# L1: 实时运营指标（Operations Metrics）
+# ============================================
+operations_metrics:
+
+  # 硬约束（红线指标）
+  hard_constraints:
+    - id: OP-01
+      name: "合法性率"
+      formula: "(legal_decisions / total_decisions) * 100"
+      threshold:
+        operator: "=="
+        value: 100
+        unit: "%"
+      alert_level: "P0"
+      action: "immediate_rollback"
+      window: "1h"
+
+    - id: OP-02
+      name: "P99延迟达标率"
+      formula: "percentile(decision_latency_ms, 0.99)"
+      threshold:
+        operator: "<"
+        value: 150
+        unit: "ms"
+      alert_level: "P1"
+      action: "urgent_investigation"
+      window: "1h"
+
+    - id: OP-03
+      name: "平均延迟达标率"
+      formula: "avg(decision_latency_ms)"
+      threshold:
+        operator: "<"
+        value: 100
+        unit: "ms"
+      alert_level: "P1"
+      action: "urgent_investigation"
+      window: "1h"
+
+    - id: OP-04
+      name: "崩溃率"
+      formula: "(crashed_games / total_games) * 100"
+      threshold:
+        operator: "=="
+        value: 0
+        unit: "%"
+      alert_level: "P0"
+      action: "immediate_rollback"
+      window: "1h"
+
+    - id: OP-05
+      name: "内存溢出率"
+      formula: "(memory_overflow_samples / total_samples) * 100"
+      threshold:
+        operator: "=="
+        value: 0
+        unit: "%"
+      alert_level: "P1"
+      action: "urgent_investigation"
+      window: "1h"
+
+  # 性能监控（黄线指标）
+  performance_warnings:
+    - id: OP-11
+      name: "平均决策延迟"
+      formula: "avg(decision_latency_ms)"
+      target: 80
+      warning_threshold: 90
+      unit: "ms"
+      alert_level: "P2"
+      window: "24h"
+
+    - id: OP-12
+      name: "P95延迟"
+      formula: "percentile(decision_latency_ms, 0.95)"
+      target: 120
+      warning_threshold: 130
+      unit: "ms"
+      alert_level: "P2"
+      window: "24h"
+
+    - id: OP-13
+      name: "内存占用中位数"
+      formula: "median(memory_usage_mb)"
+      target: 35
+      warning_threshold: 45
+      unit: "MB"
+      alert_level: "P2"
+      window: "24h"
+
+    - id: OP-14
+      name: "CPU占用峰值"
+      formula: "max(cpu_usage_percent)"
+      target: 8
+      warning_threshold: 12
+      unit: "%"
+      alert_level: "P2"
+      window: "24h"
+
+  # 稳定性监控
+  stability_metrics:
+    - id: OP-21
+      name: "胜率波动系数"
+      formula: "stddev(daily_winrate) / avg(daily_winrate)"
+      target: 0.05
+      unit: "ratio"
+      window: "7d"
+
+    - id: OP-22
+      name: "决策分布熵"
+      formula: "-sum(p_i * log(p_i))"
+      target: 2.5
+      unit: "entropy"
+      window: "24h"
+
+    - id: OP-23
+      name: "异常决策率"
+      formula: "(timeout + retry + exception) / total_decisions * 100"
+      target: 0.1
+      unit: "%"
+      window: "24h"
+
+# ============================================
+# L2: 业务健康指标（Business Health Metrics）
+# ============================================
+business_health_metrics:
+
+  # 用户体验指标
+  user_experience:
+    - id: BH-01
+      name: "玩家完局率"
+      formula: "(completed_games / started_games) * 100"
+      target_range: [85, 100]
+      unit: "%"
+      window: "7d"
+
+    - id: BH-02
+      name: "重复对局率"
+      formula: "(players_with_multiple_games / total_players) * 100"
+      target_range: [60, 100]
+      unit: "%"
+      window: "7d"
+
+    - id: BH-03
+      name: "难度切换率"
+      formula: "(difficulty_switches / total_players) * 100"
+      target_range: [0, 15]
+      unit: "%"
+      window: "7d"
+
+    - id: BH-04
+      name: "平均游戏时长"
+      formula: "avg(game_duration_minutes)"
+      target_range: [8, 12]
+      unit: "minutes"
+      window: "7d"
+
+  # 游戏质量指标
+  game_quality:
+    - id: BH-11
+      name: "接近局比率"
+      formula: "(games_with_score_diff_lt_20 / total_games) * 100"
+      target_range: [40, 60]
+      unit: "%"
+      window: "7d"
+
+    - id: BH-12
+      name: "逆转局比率"
+      formula: "(comeback_wins / total_games) * 100"
+      target_range: [20, 30]
+      unit: "%"
+      window: "7d"
+
+    - id: BH-13
+      name: "碾压局比率"
+      formula: "(games_with_score_diff_gt_60 / total_games) * 100"
+      target_range: [0, 10]
+      unit: "%"
+      window: "7d"
+
+    - id: BH-14
+      name: "平均回合数"
+      formula: "avg(rounds_per_game)"
+      target_range: [10, 14]
+      unit: "rounds"
+      window: "7d"
+
+  # 难度梯度健康度
+  difficulty_gradient:
+    - id: BH-21
+      name: "Easy难度胜率"
+      formula: "winrate(ai_easy, human_novice)"
+      target_range: [65, 75]
+      unit: "%"
+      player_segment: "novice"
+
+    - id: BH-22
+      name: "Medium难度胜率"
+      formula: "winrate(ai_medium, human_regular)"
+      target_range: [45, 55]
+      unit: "%"
+      player_segment: "regular"
+
+    - id: BH-23
+      name: "Hard难度胜率"
+      formula: "winrate(ai_hard, human_skilled)"
+      target_range: [35, 45]
+      unit: "%"
+      player_segment: "skilled"
+
+    - id: BH-24
+      name: "Expert难度胜率"
+      formula: "winrate(ai_expert, human_expert)"
+      target_range: [25, 35]
+      unit: "%"
+      player_segment: "expert"
+
+  # AI人性化指标
+  humanization:
+    - id: BH-31
+      name: "最优决策率"
+      formula: "(optimal_decisions / total_decisions) * 100"
+      target_range: [85, 95]
+      unit: "%"
+      note: "不追求100%"
+
+    - id: BH-32
+      name: "明显错误率"
+      formula: "(blunder_decisions / critical_decisions) * 100"
+      target_range: [0, 5]
+      unit: "%"
+      difficulty_specific:
+        easy: [0, 10]
+        medium: [0, 7]
+        hard: [0, 5]
+        expert: [0, 3]
+
+    - id: BH-33
+      name: "决策时间波动"
+      formula: "stddev(decision_latency_ms) / avg(decision_latency_ms)"
+      target_range: [0.2, 1.0]
+      unit: "ratio"
+      note: "模拟思考波动"
+
+    - id: BH-34
+      name: "策略风格一致性"
+      formula: "same_decision_probability_for_same_state"
+      target_range: [0.6, 0.9]
+      unit: "probability"
+      note: "有个性但不完全随机"
+
+# ============================================
+# L3: 进化质量指标（Evolution Quality Metrics）
+# ============================================
+evolution_quality_metrics:
+
+  # 进化效率指标
+  evolution_efficiency:
+    - id: EV-01
+      name: "晋升成功率"
+      formula: "(promoted_generations / total_generations) * 100"
+      target: 20
+      unit: "%"
+      note: "每5代至少1次晋升"
+
+    - id: EV-02
+      name: "代际耗时"
+      formula: "avg(generation_duration_hours)"
+      target: 3
+      unit: "hours"
+      note: "分层评估后"
+
+    - id: EV-03
+      name: "回滚率"
+      formula: "(rollback_count / promotion_count) * 100"
+      target_range: [0, 10]
+      unit: "%"
+      note: "门禁有效性"
+
+    - id: EV-04
+      name: "停滞代数"
+      formula: "consecutive_generations_without_promotion"
+      threshold: 8
+      unit: "generations"
+      action: "increase_exploration"
+
+  # 进化方向指标
+  evolution_direction:
+    - id: EV-11
+      name: "累计胜率提升"
+      formula: "current_champion_winrate - baseline_winrate"
+      trend: "monotonic_increasing"
+      unit: "%"
+      baseline: "v0_champion"
+
+    - id: EV-12
+      name: "明显错误率改善"
+      formula: "baseline_blunder_rate - current_blunder_rate"
+      trend: "monotonic_increasing"
+      unit: "%"
+      baseline: "v0_champion"
+
+    - id: EV-13
+      name: "策略多样性"
+      formula: "-sum(p_i * log(p_i))"
+      target: 2.5
+      unit: "entropy"
+      note: "避免过拟合"
+
+    - id: EV-14
+      name: "Elo评分"
+      formula: "dynamic_elo_rating"
+      trend: "monotonic_increasing"
+      unit: "elo"
+      initial: 1500
+
+  # 安全性指标（零容忍）
+  safety_metrics:
+    - id: EV-21
+      name: "规则违反次数"
+      formula: "count(illegal_moves)"
+      threshold: 0
+      action: "reject_candidate"
+
+    - id: EV-22
+      name: "信息泄漏检测"
+      formula: "count(private_info_access)"
+      threshold: 0
+      action: "reject_and_audit"
+
+    - id: EV-23
+      name: "性能退化检测"
+      formula: "(current_latency - baseline_latency) / baseline_latency * 100"
+      threshold: 20
+      unit: "%"
+      action: "reject_candidate"
+
+    - id: EV-24
+      name: "内存泄漏检测"
+      formula: "(current_memory - baseline_memory) / baseline_memory * 100"
+      threshold: 5
+      unit: "%"
+      action: "reject_candidate"
+
+# ============================================
+# 玩家分层标准
+# ============================================
+player_segmentation:
+  novice:
+    criteria:
+      - total_games: [0, 20]
+      - recent_winrate: [0, 40]
+    description: "新手玩家"
+
+  regular:
+    criteria:
+      - total_games: [20, 100]
+      - recent_winrate: [40, 60]
+    description: "普通玩家"
+
+  skilled:
+    criteria:
+      - total_games: [100, 200]
+      - recent_winrate: [50, 70]
+    description: "熟练玩家"
+
+  expert:
+    criteria:
+      - total_games: [200, 999999]
+      - recent_winrate: [65, 100]
+    description: "高手玩家"
+
+# ============================================
+# 告警配置
+# ============================================
+alert_rules:
+
+  P0_critical:
+    - metric_id: OP-01
+      condition: "value < 100"
+      duration: "0m"
+      action: "immediate_rollback"
+      notification: ["sms", "call", "slack"]
+
+    - metric_id: OP-04
+      condition: "value > 0"
+      duration: "0m"
+      action: "immediate_rollback"
+      notification: ["sms", "call", "slack"]
+
+  P1_urgent:
+    - metric_id: OP-02
+      condition: "value > 150"
+      duration: "15m"
+      action: "urgent_investigation"
+      notification: ["slack", "email"]
+
+    - metric_id: OP-03
+      condition: "value > 100"
+      duration: "15m"
+      action: "urgent_investigation"
+      notification: ["slack", "email"]
+
+  P2_warning:
+    - metric_id: OP-11
+      condition: "value > 90"
+      duration: "3h"
+      action: "monitor_and_analyze"
+      notification: ["slack"]
+
+    - metric_id: BH-32
+      condition: "value > 5"
+      duration: "6h"
+      action: "schedule_retraining"
+      notification: ["slack"]
+
+# ============================================
+# 数据采集配置
+# ============================================
+data_collection:
+
+  decision_log:
+    fields:
+      - timestamp
+      - game_id
+      - round
+      - player_id
+      - decision_type
+      - decision_latency_ms
+      - memory_mb
+      - is_legal
+      - is_optimal
+      - is_blunder
+      - cards_played
+      - context
+    sampling_rate: 1.0  # 100%采样
+    retention: "90d"
+
+  game_log:
+    fields:
+      - timestamp
+      - game_id
+      - duration_minutes
+      - rounds
+      - final_score
+      - winner
+      - players
+      - difficulty
+    sampling_rate: 1.0
+    retention: "180d"
+
+  aggregated_metrics:
+    hourly:
+      retention: "30d"
+    daily:
+      retention: "365d"
+    monthly:
+      retention: "forever"
+
+# ============================================
+# 仪表板配置
+# ============================================
+dashboards:
+
+  operations:
+    name: "运营监控大屏"
+    refresh_interval: "10s"
+    panels:
+      - type: "stat"
+        metrics: ["OP-01", "OP-02", "OP-03", "OP-04"]
+        layout: "row"
+      - type: "timeseries"
+        metrics: ["OP-11", "OP-12"]
+        time_range: "24h"
+      - type: "timeseries"
+        metrics: ["OP-21"]
+        time_range: "7d"
+
+  business:
+    name: "业务健康仪表板"
+    refresh_interval: "5m"
+    panels:
+      - type: "stat"
+        metrics: ["BH-01", "BH-02", "BH-03", "BH-04"]
+        layout: "row"
+      - type: "pie"
+        metrics: ["BH-11", "BH-12", "BH-13"]
+      - type: "gauge"
+        metrics: ["BH-21", "BH-22", "BH-23", "BH-24"]
+
+  evolution:
+    name: "进化质量仪表板"
+    refresh_interval: "1m"
+    panels:
+      - type: "timeseries"
+        metrics: ["EV-11", "EV-12"]
+        time_range: "30d"
+      - type: "stat"
+        metrics: ["EV-01", "EV-02", "EV-03", "EV-04"]
+      - type: "stat"
+        metrics: ["EV-21", "EV-22", "EV-23", "EV-24"]
+        thresholds: [0, 0, 0]
+
+# ============================================
+# 报告模板
+# ============================================
+report_templates:
+
+  daily_operations:
+    frequency: "daily"
+    time: "09:00"
+    recipients: ["ops-team@example.com"]
+    sections:
+      - "L1红线指标状态"
+      - "过去24小时告警汇总"
+      - "性能趋势分析"
+      - "异常事件列表"
+
+  weekly_business:
+    frequency: "weekly"
+    day: "monday"
+    time: "10:00"
+    recipients: ["product-team@example.com"]
+    sections:
+      - "用户体验指标周报"
+      - "游戏质量分析"
+      - "难度梯度健康度"
+      - "改进建议"
+
+  generation_comparison:
+    trigger: "on_promotion"
+    recipients: ["ai-team@example.com"]
+    sections:
+      - "核心指标对比"
+      - "置信区间分析"
+      - "稳定性验证"
+      - "晋升决策依据"
