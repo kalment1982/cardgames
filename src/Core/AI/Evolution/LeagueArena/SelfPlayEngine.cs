@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using TractorGame.Core.AI;
+using TractorGame.Core.AI.Bidding;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
@@ -67,7 +68,7 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
                 roundId: $"evo_round_g{_config.GenerationNumber}_{seed}");
 
             game.StartGame();
-            RunDealingAndAutoBidding(game);
+            RunDealingAndAutoBidding(game, seed);
             var finalizeResult = game.FinalizeTrumpEx();
             if (!finalizeResult.Success)
             {
@@ -161,9 +162,10 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
             return outcome;
         }
 
-        private static void RunDealingAndAutoBidding(Game game)
+        private static void RunDealingAndAutoBidding(Game game, int seed)
         {
             var levelRank = game.State.LevelRank;
+            var bidPolicy = new BidPolicy(seed + 5003);
             var visibleHands = new[]
             {
                 new List<Card>(),
@@ -187,50 +189,38 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
                     continue;
 
                 visibleHands[player].Add(step.Card);
-                var bidCards = BuildBidAttemptFromVisibleCards(
-                    player,
-                    visibleHands[player],
-                    levelRank,
-                    step.PlayerCardCount - 1,
-                    game.State.DealerIndex);
+                var bidDecision = bidPolicy.Decide(new BidPolicy.DecisionContext
+                {
+                    PlayerIndex = player,
+                    DealerIndex = game.State.DealerIndex,
+                    LevelRank = levelRank,
+                    VisibleCards = new List<Card>(visibleHands[player]),
+                    RoundIndex = step.PlayerCardCount - 1,
+                    CurrentBidPriority = game.CurrentBidPriority,
+                    CurrentBidPlayer = game.CurrentBidPlayer
+                });
+                var bidCards = bidDecision.AttemptCards;
                 if (bidCards.Count == 0)
                     continue;
 
-                game.BidTrumpEx(player, bidCards);
+                var bidDetail = bidDecision.ToLogDetail();
+                bidDetail["bid_attempt_mode"] = "policy";
+                bidDetail["bid_attempt_count"] = bidCards.Count;
+                var bidResult = game.BidTrumpEx(player, bidCards, bidDetail);
+                if (bidResult.Success)
+                    continue;
+
+                if (bidCards.Count > 1)
+                {
+                    var single = new List<Card> { bidCards[0] };
+                    if (game.CanBidTrumpEx(player, single).Success)
+                    {
+                        bidDetail["bid_attempt_mode"] = "fallback_single";
+                        bidDetail["bid_attempt_count"] = 1;
+                        game.BidTrumpEx(player, single, bidDetail);
+                    }
+                }
             }
-        }
-
-        private static List<Card> BuildBidAttemptFromVisibleCards(
-            int playerIndex,
-            List<Card> visibleCards,
-            Rank levelRank,
-            int roundIndex,
-            int dealerIndex)
-        {
-            if (visibleCards == null || visibleCards.Count == 0)
-                return new List<Card>();
-
-            var levelCardsBySuit = visibleCards
-                .Where(c => c.Rank == levelRank && c.Suit != Suit.Joker)
-                .GroupBy(c => c.Suit)
-                .Select(group => new { Suit = group.Key, Cards = group.ToList() })
-                .OrderByDescending(x => x.Cards.Count)
-                .ThenBy(x => x.Suit)
-                .ToList();
-
-            if (levelCardsBySuit.Count == 0)
-                return new List<Card>();
-
-            var best = levelCardsBySuit[0];
-            if (best.Cards.Count >= 2)
-                return best.Cards.Take(2).ToList();
-
-            var dealerSide = playerIndex % 2 == dealerIndex % 2;
-            var lateDeal = roundIndex >= 18;
-            if (dealerSide || lateDeal)
-                return best.Cards.Take(1).ToList();
-
-            return new List<Card>();
         }
 
         private static AIPlayer[] BuildAiPlayers(
@@ -289,10 +279,13 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
         {
             if (game.CurrentTrick.Count == 0)
             {
-                var opponents = Enumerable.Range(0, 4)
-                    .Where(i => i % 2 != playerIndex % 2)
+                var otherPlayers = Enumerable.Range(0, 4)
+                    .Where(i => i != playerIndex)
                     .ToList();
-                return ai.Lead(hand, role, playerIndex, opponents);
+                var knownBottomCards = playerIndex == game.State.DealerIndex
+                    ? new List<Card>(game.State.BuriedCards)
+                    : null;
+                return ai.Lead(hand, role, playerIndex, otherPlayers, knownBottomCards);
             }
 
             var leadCards = game.CurrentTrick[0].Cards;

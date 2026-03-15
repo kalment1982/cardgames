@@ -186,7 +186,8 @@ public sealed class ReplayLogParserService
             {
                 Pattern = ReadString(item, "pattern") ?? string.Empty,
                 Category = ReadString(item, "category") ?? string.Empty,
-                CardScore = ReadInt(item, "cards_score")
+                CardScore = ReadInt(item, "cards_score"),
+                FallbackPatternType = ReadString(item, "fallback_pattern_type") ?? string.Empty
             };
         }
 
@@ -332,4 +333,5 @@ public sealed class ReplayPlayAnalysis
     public string Pattern { get; set; } = string.Empty;
     public string Category { get; set; } = string.Empty;
     public int CardScore { get; set; }
+    public string FallbackPatternType { get; set; } = string.Empty;
 }

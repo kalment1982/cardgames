@@ -2,6 +2,7 @@ using Xunit;
 using System.Collections.Generic;
 using TractorGame.Core.Models;
 using TractorGame.Core.GameFlow;
+using TractorGame.Core.Logging;
 
 namespace TractorGame.Tests
 {
@@ -106,6 +107,54 @@ namespace TractorGame.Tests
             bool result = game.PlayCards(1, new List<Card> { card });
 
             Assert.False(result);
+        }
+
+        [Fact]
+        public void LastCompletedTrick_AvailableAfterTrickFinished()
+        {
+            var game = new Game(1);
+            game.StartGame();
+            DealToEnd(game);
+            game.FinalizeTrump(Suit.Spade);
+
+            var hand = game.State.PlayerHands[0];
+            Assert.True(game.BuryBottom(hand.GetRange(0, 8)));
+
+            game.State.PlayerHands[0] = new List<Card> { new Card(Suit.Heart, Rank.Ace) };
+            game.State.PlayerHands[1] = new List<Card> { new Card(Suit.Heart, Rank.King) };
+            game.State.PlayerHands[2] = new List<Card> { new Card(Suit.Heart, Rank.Queen) };
+            game.State.PlayerHands[3] = new List<Card> { new Card(Suit.Heart, Rank.Jack) };
+            game.State.Phase = GamePhase.Playing;
+            game.State.CurrentPlayer = 0;
+            game.CurrentTrick.Clear();
+
+            Assert.True(game.PlayCards(0, new List<Card> { new Card(Suit.Heart, Rank.Ace) }));
+            Assert.True(game.PlayCards(1, new List<Card> { new Card(Suit.Heart, Rank.King) }));
+            Assert.True(game.PlayCards(2, new List<Card> { new Card(Suit.Heart, Rank.Queen) }));
+            Assert.True(game.PlayCards(3, new List<Card> { new Card(Suit.Heart, Rank.Jack) }));
+
+            Assert.Empty(game.CurrentTrick);
+            Assert.Equal(1, game.LastCompletedTrickNo);
+            Assert.Equal(4, game.LastCompletedTrick.Count);
+            Assert.Equal(0, game.LastCompletedTrick[0].PlayerIndex);
+            Assert.Equal(new Card(Suit.Heart, Rank.Ace), game.LastCompletedTrick[0].Cards[0]);
+            Assert.Equal(3, game.LastCompletedTrick[3].PlayerIndex);
+            Assert.Equal(new Card(Suit.Heart, Rank.Jack), game.LastCompletedTrick[3].Cards[0]);
+        }
+
+        [Fact]
+        public void CanBidTrumpEx_ReturnsPriorityTooLow_WhenSingleCannotOvertakeSingle()
+        {
+            var game = new Game(1);
+            game.StartGame();
+            DealToEnd(game);
+
+            Assert.True(game.BidTrump(1, new List<Card> { new Card(Suit.Heart, Rank.Two) }));
+
+            var check = game.CanBidTrumpEx(0, new List<Card> { new Card(Suit.Spade, Rank.Two) });
+
+            Assert.False(check.Success);
+            Assert.Equal(ReasonCodes.BidPriorityTooLow, check.ReasonCode);
         }
 
         private static void DealToEnd(Game game)

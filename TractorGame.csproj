@@ -19,6 +19,9 @@
     <Compile Remove="WebUI/**" />
     <EmbeddedResource Remove="WebUI/**" />
     <None Remove="WebUI/**" />
+    <Compile Remove="WebUIHost/**" />
+    <EmbeddedResource Remove="WebUIHost/**" />
+    <None Remove="WebUIHost/**" />
   </ItemGroup>
 
 </Project>

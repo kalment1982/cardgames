@@ -25,10 +25,12 @@ namespace TractorGame.Core.Rules
     public class TrickJudge
     {
         private readonly GameConfig _config;
+        private readonly CardComparer _comparer;
 
         public TrickJudge(GameConfig config)
         {
             _config = config;
+            _comparer = new CardComparer(config);
         }
 
         /// <summary>
@@ -42,111 +44,25 @@ namespace TractorGame.Core.Rules
             var leadPlay = plays[0];
             var leadCategory = _config.GetCardCategory(leadPlay.Cards[0]);
             var leadSuit = leadPlay.Cards[0].Suit;
+            var leadComponents = DecomposeLeadComponents(leadPlay.Cards);
 
             int winnerIndex = 0;
-            var winnerPlay = leadPlay;
+            var winnerProfile = BuildComparisonProfile(leadPlay.Cards, leadSuit, leadCategory, leadComponents);
 
             for (int i = 1; i < plays.Count; i++)
             {
                 var currentPlay = plays[i];
 
                 // 比较当前出牌和当前获胜者
-                if (IsStronger(currentPlay, winnerPlay, leadSuit, leadCategory))
+                var currentProfile = BuildComparisonProfile(currentPlay.Cards, leadSuit, leadCategory, leadComponents);
+                if (CompareProfiles(currentProfile, winnerProfile) > 0)
                 {
                     winnerIndex = i;
-                    winnerPlay = currentPlay;
+                    winnerProfile = currentProfile;
                 }
             }
 
             return plays[winnerIndex].PlayerIndex;
-        }
-
-        /// <summary>
-        /// 判断 play1 是否强于 play2
-        /// </summary>
-        private bool IsStronger(TrickPlay play1, TrickPlay play2, Suit leadSuit, CardCategory leadCategory)
-        {
-            var cat1 = _config.GetCardCategory(play1.Cards[0]);
-            var cat2 = _config.GetCardCategory(play2.Cards[0]);
-            var pattern1 = new CardPattern(play1.Cards, _config).Type;
-            var pattern2 = new CardPattern(play2.Cards, _config).Type;
-
-            // 主牌压副牌
-            if (cat1 == CardCategory.Trump && cat2 == CardCategory.Suit)
-            {
-                // 结构约束：毙牌不能用更弱结构压更强结构
-                // 例如：副牌对子不能被主牌散牌（Mixed）压过
-                return GetPatternPriority(pattern1) >= GetPatternPriority(pattern2);
-            }
-            if (cat1 == CardCategory.Suit && cat2 == CardCategory.Trump)
-                return false;
-
-            // 都是主牌，比较主牌大小
-            if (cat1 == CardCategory.Trump && cat2 == CardCategory.Trump)
-                return CompareTrumpCards(play1.Cards, play2.Cards);
-
-            // 都是副牌
-            var suit1 = play1.Cards[0].Suit;
-            var suit2 = play2.Cards[0].Suit;
-
-            // 首引花色压其他花色（垫牌）
-            bool isLeadSuit1 = (suit1 == leadSuit && cat1 == leadCategory);
-            bool isLeadSuit2 = (suit2 == leadSuit && cat2 == leadCategory);
-
-            if (isLeadSuit1 && !isLeadSuit2)
-                return true;
-            if (!isLeadSuit1 && isLeadSuit2)
-                return false;
-
-            // 都是首引花色，比较大小
-            if (isLeadSuit1 && isLeadSuit2)
-                return CompareSuitCards(play1.Cards, play2.Cards);
-
-            // 都是垫牌，无法比较
-            return false;
-        }
-
-        /// <summary>
-        /// 比较主牌大小
-        /// </summary>
-        private bool CompareTrumpCards(List<Card> cards1, List<Card> cards2)
-        {
-            var pattern1 = new CardPattern(cards1, _config);
-            var pattern2 = new CardPattern(cards2, _config);
-
-            // 比较牌型优先级：拖拉机 > 对子 > 单张
-            if (pattern1.Type != pattern2.Type)
-            {
-                return GetPatternPriority(pattern1.Type) > GetPatternPriority(pattern2.Type);
-            }
-
-            // 同牌型，比较最大牌
-            var comparer = new CardComparer(_config);
-            var sorted1 = cards1.OrderByDescending(c => c, comparer).ToList();
-            var sorted2 = cards2.OrderByDescending(c => c, comparer).ToList();
-
-            return comparer.Compare(sorted1[0], sorted2[0]) > 0;
-        }
-
-        /// <summary>
-        /// 比较副牌大小
-        /// </summary>
-        private bool CompareSuitCards(List<Card> cards1, List<Card> cards2)
-        {
-            var pattern1 = new CardPattern(cards1, _config);
-            var pattern2 = new CardPattern(cards2, _config);
-
-            // 比较牌型优先级
-            if (pattern1.Type != pattern2.Type)
-            {
-                return GetPatternPriority(pattern1.Type) > GetPatternPriority(pattern2.Type);
-            }
-
-            // 同牌型，比较最大牌
-            var max1 = cards1.Max(c => (int)c.Rank);
-            var max2 = cards2.Max(c => (int)c.Rank);
-
-            return max1 > max2;
         }
 
         private int GetPatternPriority(PatternType type)
@@ -159,6 +75,357 @@ namespace TractorGame.Core.Rules
                 PatternType.Mixed => 0,
                 _ => 0
             };
+        }
+
+        private ComparisonProfile BuildComparisonProfile(
+            List<Card> cards,
+            Suit leadSuit,
+            CardCategory leadCategory,
+            List<LeadComponent> leadComponents)
+        {
+            var leadOrigin = leadCategory == CardCategory.Trump ? ComponentOrigin.Trump : ComponentOrigin.Suit;
+            var leadSystemCards = cards.Where(card => MatchesLeadSystem(card, leadSuit, leadCategory)).ToList();
+            var suitOrTrumpComponents = DecomposeComponents(leadSystemCards, leadOrigin);
+            var trumpComponents = leadCategory == CardCategory.Trump
+                ? new List<ComparableComponent>()
+                : DecomposeComponents(cards.Where(_config.IsTrump).ToList(), ComponentOrigin.Trump);
+
+            var usedLeadSystem = new bool[suitOrTrumpComponents.Count];
+            var usedTrump = new bool[trumpComponents.Count];
+            var matched = new List<MatchedComponent>(leadComponents.Count);
+
+            foreach (var leadComponent in leadComponents)
+            {
+                int leadSystemIndex = FindBestMatchIndex(suitOrTrumpComponents, usedLeadSystem, leadComponent);
+                int trumpIndex = FindBestMatchIndex(trumpComponents, usedTrump, leadComponent);
+
+                bool useTrump = trumpIndex >= 0 && IsTrumpCandidateStronger(
+                    trumpComponents[trumpIndex],
+                    leadSystemIndex >= 0 ? suitOrTrumpComponents[leadSystemIndex] : null);
+
+                if (useTrump)
+                {
+                    usedTrump[trumpIndex] = true;
+                    matched.Add(new MatchedComponent(
+                        ComponentOrigin.Trump,
+                        trumpComponents[trumpIndex].HighestCard));
+                }
+                else if (leadSystemIndex >= 0)
+                {
+                    usedLeadSystem[leadSystemIndex] = true;
+                    matched.Add(new MatchedComponent(
+                        suitOrTrumpComponents[leadSystemIndex].Origin,
+                        suitOrTrumpComponents[leadSystemIndex].HighestCard));
+                }
+                else
+                {
+                    matched.Add(MatchedComponent.None);
+                }
+            }
+
+            return new ComparisonProfile(
+                matched.All(component => component.Origin != ComponentOrigin.None),
+                matched);
+        }
+
+        private bool MatchesLeadSystem(Card card, Suit leadSuit, CardCategory leadCategory)
+        {
+            if (leadCategory == CardCategory.Trump)
+                return _config.IsTrump(card);
+
+            return !_config.IsTrump(card) && card.Suit == leadSuit;
+        }
+
+        private List<LeadComponent> DecomposeLeadComponents(List<Card> cards)
+        {
+            return DecomposeComponents(cards, ComponentOrigin.Suit)
+                .Select(component => new LeadComponent(
+                    component.Type,
+                    component.PairCount,
+                    component.HighestCard))
+                .ToList();
+        }
+
+        private List<ComparableComponent> DecomposeComponents(List<Card> cards, ComponentOrigin origin)
+        {
+            var components = new List<ComparableComponent>();
+            if (cards == null || cards.Count == 0)
+                return components;
+
+            var pairRepresentatives = new List<Card>();
+            var singles = new List<Card>();
+
+            var groups = cards
+                .GroupBy(card => card)
+                .Select(group => new { Card = group.Key, Count = group.Count() })
+                .ToList();
+
+            foreach (var group in groups)
+            {
+                int pairCount = group.Count / 2;
+                for (int i = 0; i < pairCount; i++)
+                    pairRepresentatives.Add(group.Card);
+
+                if (group.Count % 2 == 1)
+                    singles.Add(group.Card);
+            }
+
+            while (true)
+            {
+                var tractors = FindAllTractors(pairRepresentatives, origin);
+                if (tractors.Count == 0)
+                    break;
+
+                var best = tractors
+                    .OrderByDescending(component => component.PairCount)
+                    .ThenByDescending(component => component.HighestCard, _comparer)
+                    .First();
+
+                components.Add(best);
+                RemovePairRepresentatives(pairRepresentatives, best.Cards);
+            }
+
+            foreach (var pair in pairRepresentatives)
+            {
+                components.Add(new ComparableComponent(
+                    PatternType.Pair,
+                    1,
+                    pair,
+                    origin,
+                    new List<Card> { pair, pair }));
+            }
+
+            foreach (var single in singles.OrderByDescending(card => card, _comparer))
+            {
+                components.Add(new ComparableComponent(
+                    PatternType.Single,
+                    0,
+                    single,
+                    origin,
+                    new List<Card> { single }));
+            }
+
+            return components
+                .OrderByDescending(component => GetPatternPriority(component.Type))
+                .ThenByDescending(component => component.HighestCard, _comparer)
+                .ToList();
+        }
+
+        private List<ComparableComponent> FindAllTractors(List<Card> pairRepresentatives, ComponentOrigin origin)
+        {
+            var tractors = new List<ComparableComponent>();
+            if (pairRepresentatives.Count < 2)
+                return tractors;
+
+            int count = pairRepresentatives.Count;
+            int maskLimit = 1 << count;
+
+            for (int mask = 0; mask < maskLimit; mask++)
+            {
+                int pairCount = CountBits(mask);
+                if (pairCount < 2)
+                    continue;
+
+                var candidatePairs = new List<Card>(pairCount);
+                var candidateCards = new List<Card>(pairCount * 2);
+
+                for (int i = 0; i < count; i++)
+                {
+                    if ((mask & (1 << i)) == 0)
+                        continue;
+
+                    var pair = pairRepresentatives[i];
+                    candidatePairs.Add(pair);
+                    candidateCards.Add(pair);
+                    candidateCards.Add(pair);
+                }
+
+                var pattern = new CardPattern(candidateCards, _config);
+                if (!pattern.IsTractor(candidateCards))
+                    continue;
+
+                var sortedPairs = candidatePairs.OrderBy(card => card, _comparer).ToList();
+                tractors.Add(new ComparableComponent(
+                    PatternType.Tractor,
+                    pairCount,
+                    sortedPairs[^1],
+                    origin,
+                    candidateCards));
+            }
+
+            return tractors;
+        }
+
+        private void RemovePairRepresentatives(List<Card> sourcePairs, List<Card> usedCards)
+        {
+            var toRemove = usedCards
+                .GroupBy(card => card)
+                .ToDictionary(group => group.Key, group => group.Count() / 2);
+
+            foreach (var entry in toRemove)
+            {
+                int remaining = entry.Value;
+                for (int i = sourcePairs.Count - 1; i >= 0 && remaining > 0; i--)
+                {
+                    if (!sourcePairs[i].Equals(entry.Key))
+                        continue;
+
+                    sourcePairs.RemoveAt(i);
+                    remaining--;
+                }
+            }
+        }
+
+        private static int CountBits(int value)
+        {
+            int count = 0;
+            while (value != 0)
+            {
+                value &= value - 1;
+                count++;
+            }
+
+            return count;
+        }
+
+        private int FindBestMatchIndex(
+            List<ComparableComponent> candidates,
+            bool[] used,
+            LeadComponent leadComponent)
+        {
+            int bestIndex = -1;
+
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (used[i] || !IsCompatible(candidates[i], leadComponent))
+                    continue;
+
+                if (bestIndex < 0 ||
+                    CompareComponentStrength(candidates[i], candidates[bestIndex]) > 0)
+                {
+                    bestIndex = i;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private bool IsCompatible(ComparableComponent candidate, LeadComponent leadComponent)
+        {
+            return candidate.Type == leadComponent.Type
+                && candidate.PairCount == leadComponent.PairCount;
+        }
+
+        private bool IsTrumpCandidateStronger(ComparableComponent trumpCandidate, ComparableComponent? leadSystemCandidate)
+        {
+            if (leadSystemCandidate == null)
+                return true;
+
+            return CompareComponentStrength(trumpCandidate, leadSystemCandidate) > 0;
+        }
+
+        private int CompareProfiles(ComparisonProfile left, ComparisonProfile right)
+        {
+            if (left.IsComplete != right.IsComplete)
+                return left.IsComplete ? 1 : -1;
+
+            for (int i = 0; i < left.Components.Count; i++)
+            {
+                int componentCompare = CompareMatchedComponents(left.Components[i], right.Components[i]);
+                if (componentCompare != 0)
+                    return componentCompare;
+            }
+
+            return 0;
+        }
+
+        private int CompareMatchedComponents(MatchedComponent left, MatchedComponent right)
+        {
+            if (left.Origin != right.Origin)
+                return left.Origin.CompareTo(right.Origin);
+
+            if (left.Origin == ComponentOrigin.None || left.HighestCard == null || right.HighestCard == null)
+                return 0;
+
+            return _comparer.Compare(left.HighestCard, right.HighestCard);
+        }
+
+        private int CompareComponentStrength(ComparableComponent left, ComparableComponent right)
+        {
+            if (left.Origin != right.Origin)
+                return left.Origin.CompareTo(right.Origin);
+
+            return _comparer.Compare(left.HighestCard, right.HighestCard);
+        }
+
+        private enum ComponentOrigin
+        {
+            None = 0,
+            Suit = 1,
+            Trump = 2
+        }
+
+        private sealed class LeadComponent
+        {
+            public PatternType Type { get; }
+            public int PairCount { get; }
+            public Card HighestCard { get; }
+
+            public LeadComponent(PatternType type, int pairCount, Card highestCard)
+            {
+                Type = type;
+                PairCount = pairCount;
+                HighestCard = highestCard;
+            }
+        }
+
+        private sealed class ComparableComponent
+        {
+            public PatternType Type { get; }
+            public int PairCount { get; }
+            public Card HighestCard { get; }
+            public ComponentOrigin Origin { get; }
+            public List<Card> Cards { get; }
+
+            public ComparableComponent(
+                PatternType type,
+                int pairCount,
+                Card highestCard,
+                ComponentOrigin origin,
+                List<Card> cards)
+            {
+                Type = type;
+                PairCount = pairCount;
+                HighestCard = highestCard;
+                Origin = origin;
+                Cards = cards;
+            }
+        }
+
+        private sealed class MatchedComponent
+        {
+            public static MatchedComponent None { get; } = new(ComponentOrigin.None, null);
+
+            public ComponentOrigin Origin { get; }
+            public Card? HighestCard { get; }
+
+            public MatchedComponent(ComponentOrigin origin, Card? highestCard)
+            {
+                Origin = origin;
+                HighestCard = highestCard;
+            }
+        }
+
+        private sealed class ComparisonProfile
+        {
+            public bool IsComplete { get; }
+            public List<MatchedComponent> Components { get; }
+
+            public ComparisonProfile(bool isComplete, List<MatchedComponent> components)
+            {
+                IsComplete = isComplete;
+                Components = components;
+            }
         }
     }
 }

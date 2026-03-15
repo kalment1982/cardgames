@@ -2,6 +2,7 @@ using Xunit;
 using System.Collections.Generic;
 using TractorGame.Core.Models;
 using TractorGame.Core.GameFlow;
+using TractorGame.Core.Logging;
 
 namespace TractorGame.Tests
 {
@@ -84,6 +85,29 @@ namespace TractorGame.Tests
             bidding.SelfProtect(Suit.Diamond);
 
             Assert.Equal(Suit.Diamond, bidding.TrumpSuit);
+        }
+
+        [Fact]
+        public void CanBidEx_DoesNotMutateState()
+        {
+            var bidding = new TrumpBidding();
+            var result = bidding.CanBidEx(0, Rank.Two, new List<Card> { new Card(Suit.Spade, Rank.Two) });
+
+            Assert.True(result.Success);
+            Assert.Null(bidding.TrumpSuit);
+            Assert.Equal(-1, bidding.TrumpPlayer);
+        }
+
+        [Fact]
+        public void CanBidEx_ReturnsPriorityTooLow_WhenExistingBidCannotBeOvertaken()
+        {
+            var bidding = new TrumpBidding();
+            Assert.True(bidding.TryBid(0, Rank.Two, new List<Card> { new Card(Suit.Spade, Rank.Two) }));
+
+            var result = bidding.CanBidEx(1, Rank.Two, new List<Card> { new Card(Suit.Heart, Rank.Two) });
+
+            Assert.False(result.Success);
+            Assert.Equal(ReasonCodes.BidPriorityTooLow, result.ReasonCode);
         }
     }
 }

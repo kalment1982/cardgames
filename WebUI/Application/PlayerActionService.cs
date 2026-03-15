@@ -25,7 +25,19 @@ public sealed class PlayerActionService
         if (game.State.Phase != GamePhase.Bidding)
             return false;
 
-        return vm.PlayerHand.Any(c => c.Rank == game.State.LevelRank && c.Suit == suit);
+        var levelCards = GetBidLevelCards(game, vm, suit);
+        if (levelCards.Count == 0)
+            return false;
+
+        // 从高优先级（多张）到低优先级（单张）尝试，确保按钮状态与真实亮主判定一致。
+        for (var count = levelCards.Count; count >= 1; count--)
+        {
+            var attempt = levelCards.Take(count).ToList();
+            if (game.CanBidTrumpEx(0, attempt).Success)
+                return true;
+        }
+
+        return false;
     }
 
     public List<Card> GetBidLevelCards(Game game, GamePageViewModel vm, Suit suit)
@@ -33,4 +45,3 @@ public sealed class PlayerActionService
         return vm.PlayerHand.Where(c => c.Rank == game.State.LevelRank && c.Suit == suit).ToList();
     }
 }
-

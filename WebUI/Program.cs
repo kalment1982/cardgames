@@ -8,6 +8,7 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+builder.Services.AddScoped<LogRelayClient>();
 builder.Services.AddScoped<UiMessageService>();
 builder.Services.AddScoped<UiAutomationService>();
 builder.Services.AddScoped<AITurnService>();

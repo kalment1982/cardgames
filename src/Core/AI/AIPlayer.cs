@@ -108,8 +108,9 @@ namespace TractorGame.Core.AI
         /// <param name="role">AI角色</param>
         /// <param name="myPosition">我的位置（用于记牌评估）</param>
         /// <param name="opponentPositions">对手位置列表（用于甩牌评估）</param>
+        /// <param name="knownBottomCards">当前玩家可见的底牌（通常仅庄家可见）</param>
         public List<Card> Lead(List<Card> hand, AIRole role = AIRole.Opponent,
-            int myPosition = -1, List<int>? opponentPositions = null)
+            int myPosition = -1, List<int>? opponentPositions = null, List<Card>? knownBottomCards = null)
         {
             if (hand == null || hand.Count == 0)
                 return new List<Card>();
@@ -127,7 +128,7 @@ namespace TractorGame.Core.AI
             var cardComparer = new CardComparer(_config);
             var playValidator = new PlayValidator(_config);
 
-            var candidates = BuildLeadCandidates(hand, cardComparer, role, myPosition, opponentPositions)
+            var candidates = BuildLeadCandidates(hand, cardComparer, role, myPosition, opponentPositions, knownBottomCards)
                 .Where(c => playValidator.IsValidPlay(hand, c))
                 .ToList();
 
@@ -213,14 +214,25 @@ namespace TractorGame.Core.AI
                 }
                 else if (leadCategory2 == CardCategory.Suit)
                 {
-                    // 对手赢牌且是副牌：尝试用主牌毙牌
+                    // 对手赢牌且是副牌：仅在"确实可赢"时才尝试主牌毙牌，避免无效浪费大牌/主牌
                     var trumpCards = remaining.Where(_config.IsTrump)
                         .OrderByDescending(c => c, cardComparer)
                         .ToList();
                     var cutPriority = ResolveRoleWeighted01(_strategy.FollowTrumpCutPriority, role, neutral: 0.6);
                     var maxCuts = (int)System.Math.Ceiling(missing * cutPriority);
-                    if (maxCuts > 0)
-                        filler.AddRange(trumpCards.Take(System.Math.Min(missing, maxCuts)));
+                    int cutCount = System.Math.Min(System.Math.Min(missing, maxCuts), trumpCards.Count);
+                    if (cutCount > 0)
+                    {
+                        var trumpAttempt = trumpCards.Take(cutCount).ToList();
+                        var remainingAfterTrump = RemoveCards(remaining, trumpAttempt);
+                        var trialFiller = trumpAttempt
+                            .Concat(remainingAfterTrump.OrderBy(c => c, cardComparer).Take(missing - trumpAttempt.Count))
+                            .ToList();
+                        var trialCandidate = mustFollow.Concat(trialFiller).ToList();
+
+                        if (CanBeatCards(currentWinningCards, trialCandidate))
+                            filler.AddRange(trumpAttempt);
+                    }
                 }
 
                 // 填充剩余
@@ -401,7 +413,7 @@ namespace TractorGame.Core.AI
         }
 
         private List<List<Card>> BuildLeadCandidates(List<Card> hand, CardComparer comparer, AIRole role,
-            int myPosition, List<int>? opponentPositions)
+            int myPosition, List<int>? opponentPositions, List<Card>? knownBottomCards)
         {
             var groups = new List<List<Card>>();
 
@@ -424,7 +436,7 @@ namespace TractorGame.Core.AI
                 if (sorted.Count >= 3)
                 {
                     // 使用记牌系统评估甩牌成功率
-                    bool canThrow = CanSafelyThrow(sorted, hand, myPosition, opponentPositions);
+                    bool canThrow = CanSafelyThrow(sorted, hand, myPosition, opponentPositions, knownBottomCards);
                     var dealerThrowAggressiveness = Math.Min(1.0, _strategy.LeadThrowAggressiveness + 0.15);
 
                     if (canThrow)
@@ -432,15 +444,15 @@ namespace TractorGame.Core.AI
                         // 甩牌成功率高，可以尝试
                         candidates.Add(sorted);
                     }
-                    else if (isDealerSide && sorted.Count >= 4 && _random.NextDouble() < dealerThrowAggressiveness * 0.35)
+                    else if (isDealerSide && sorted.Count >= 4)
                     {
-                        // 庄家先手可适度激进，尝试中等规模甩牌以发挥底牌优势。
-                        candidates.Add(sorted.Take(4).ToList());
-                    }
-                    else if (!isDealerSide && sorted.Count >= 5)
-                    {
-                        // 闲家且牌很多，即使风险也可以尝试（激进策略）
-                        candidates.Add(sorted);
+                        // 保守策略：仅在4张子甩也安全时，才允许小概率尝试。
+                        var cautiousThrow = sorted.Take(4).ToList();
+                        bool canCautiousThrow = CanSafelyThrow(cautiousThrow, hand, myPosition, opponentPositions, knownBottomCards);
+                        if (canCautiousThrow && _random.NextDouble() < dealerThrowAggressiveness * 0.25)
+                        {
+                            candidates.Add(cautiousThrow);
+                        }
                     }
                 }
 
@@ -470,7 +482,7 @@ namespace TractorGame.Core.AI
         /// 判断是否可以安全甩牌
         /// </summary>
         private bool CanSafelyThrow(List<Card> throwCards, List<Card> hand,
-            int myPosition, List<int>? opponentPositions)
+            int myPosition, List<int>? opponentPositions, List<Card>? knownBottomCards)
         {
             // 简单难度：不评估，随机决定
             if (_difficulty == AIDifficulty.Easy)
@@ -480,9 +492,18 @@ namespace TractorGame.Core.AI
             if (opponentPositions == null || opponentPositions.Count == 0)
                 return throwCards.Count <= 2; // 只允许甩2张以下
 
-            // 使用记牌系统评估
-            double successProbability = _memory.EvaluateThrowSuccessProbability(
-                throwCards, hand, myPosition, opponentPositions);
+            var others = opponentPositions
+                .Where(pos => pos != myPosition)
+                .Distinct()
+                .ToList();
+            if (others.Count == 0)
+                return throwCards.Count <= 2;
+
+            // 先做保守硬判定，再看概率阈值
+            var safety = _memory.EvaluateThrowSafety(
+                throwCards, hand, myPosition, others, knownBottomCards);
+            if (!safety.IsDeterministicallySafe)
+                return false;
 
             // 根据难度设置阈值
             double threshold = _difficulty switch
@@ -493,7 +514,7 @@ namespace TractorGame.Core.AI
                 _ => 0.5
             };
 
-            return successProbability >= threshold;
+            return safety.SuccessProbability >= threshold;
         }
 
         private List<List<Card>> BuildSameCategoryFollowCandidates(
@@ -603,8 +624,8 @@ namespace TractorGame.Core.AI
         private List<Card> SelectBestFollowCandidate(List<List<Card>> candidates, List<Card> currentWinningCards,
             CardComparer comparer, AIRole role, bool partnerWinning)
         {
-            // 随机决策
-            if (ShouldUseRandomDecision() && candidates.Count > 0)
+            // 跟牌阶段仅在简单难度允许随机，避免中高难度出现"明知不能赢却垫大牌"的噪声决策
+            if (_difficulty == AIDifficulty.Easy && ShouldUseRandomDecision() && candidates.Count > 0)
                 return candidates[_random.Next(candidates.Count)];
 
             var best = candidates[0];
@@ -645,7 +666,7 @@ namespace TractorGame.Core.AI
                     int minValueA = a.Min(c => GetCardValue(c));
                     int minValueB = b.Min(c => GetCardValue(c));
                     if (minValueA != minValueB)
-                        return minValueA.CompareTo(minValueB); // 小牌优先
+                        return minValueB.CompareTo(minValueA); // 小牌优先
                 }
 
                 // 3. 避免垫主牌
@@ -655,7 +676,7 @@ namespace TractorGame.Core.AI
                     int trumpCountA = a.Count(_config.IsTrump);
                     int trumpCountB = b.Count(_config.IsTrump);
                     if (trumpCountA != trumpCountB)
-                        return trumpCountA.CompareTo(trumpCountB); // 少垫主牌
+                        return trumpCountB.CompareTo(trumpCountA); // 少垫主牌
                 }
 
                 // 4. 保留对子
@@ -715,7 +736,7 @@ namespace TractorGame.Core.AI
                         int avgValueA = (int)a.Average(c => GetCardValue(c));
                         int avgValueB = (int)b.Average(c => GetCardValue(c));
                         if (avgValueA != avgValueB)
-                            return avgValueA.CompareTo(avgValueB); // 小牌优先
+                            return avgValueB.CompareTo(avgValueA); // 小牌优先
                     }
 
                     // 3. 避免垫主牌
@@ -725,7 +746,7 @@ namespace TractorGame.Core.AI
                         int trumpCountA = a.Count(_config.IsTrump);
                         int trumpCountB = b.Count(_config.IsTrump);
                         if (trumpCountA != trumpCountB)
-                            return trumpCountA.CompareTo(trumpCountB); // 少垫主牌
+                            return trumpCountB.CompareTo(trumpCountA); // 少垫主牌
                     }
 
                     // 4. 庄家额外保守

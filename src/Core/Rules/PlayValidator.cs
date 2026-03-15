@@ -75,9 +75,7 @@ namespace TractorGame.Core.Rules
                 return OperationResult.Ok;
 
             // 混合牌型（甩牌）需要验证是否能成功
-            return ValidateThrow(cardsToPlay, otherHands)
-                ? OperationResult.Ok
-                : OperationResult.Fail(ReasonCodes.ThrowNotMax);
+            return ValidateThrowEx(cardsToPlay, otherHands);
         }
 
         /// <summary>
@@ -85,16 +83,24 @@ namespace TractorGame.Core.Rules
         /// </summary>
         private bool ValidateThrow(List<Card> throwCards, List<List<Card>> otherHands)
         {
+            return ValidateThrowEx(throwCards, otherHands).Success;
+        }
+
+        private OperationResult ValidateThrowEx(List<Card> throwCards, List<List<Card>> otherHands)
+        {
             // 检查是否同花色
             if (!IsSameSuitOrTrump(throwCards))
-                return false;
+                return OperationResult.Fail(ReasonCodes.ThrowNotMax);
 
             // 如果没有提供其他玩家手牌，只能做基础验证
             if (otherHands == null || otherHands.Count == 0)
-                return true;
+                return OperationResult.Ok;
 
             var throwValidator = new ThrowValidator(_config);
-            return throwValidator.IsThrowSuccessful(throwCards, otherHands);
+            var check = throwValidator.AnalyzeThrow(throwCards, otherHands);
+            return check.Success
+                ? OperationResult.Ok
+                : OperationResult.Fail(ReasonCodes.ThrowNotMax, check.Detail);
         }
 
         /// <summary>

@@ -16,6 +16,7 @@ namespace TractorGame.Core.GameFlow
 
         public Suit? TrumpSuit => _trumpSuit;
         public int TrumpPlayer => _trumpPlayer;
+        public int TrumpLevel => _trumpLevel;
 
         /// <summary>
         /// 尝试亮主
@@ -26,45 +27,42 @@ namespace TractorGame.Core.GameFlow
         }
 
         /// <summary>
+        /// 校验亮主（不修改状态）。
+        /// </summary>
+        public OperationResult CanBidEx(int playerIndex, Rank levelRank, List<Card> cards)
+        {
+            var attemptCards = cards ?? new List<Card>();
+            var inspect = InspectBid(levelRank, attemptCards);
+            if (!inspect.Success)
+                return OperationResult.Fail(inspect.ReasonCode!);
+
+            if (_trumpSuit != null)
+            {
+                // 已有亮主时，必须更高优先级才能反主。
+                if (inspect.BidLevel <= _trumpLevel)
+                    return OperationResult.Fail(ReasonCodes.BidPriorityTooLow);
+            }
+
+            return OperationResult.Ok;
+        }
+
+        /// <summary>
         /// 尝试亮主（携带 reason_code）。
         /// </summary>
         public OperationResult TryBidEx(int playerIndex, Rank levelRank, List<Card> cards)
         {
-            if (cards == null || cards.Count == 0)
-                return OperationResult.Fail(ReasonCodes.BidNotLevelCard);
+            var attemptCards = cards ?? new List<Card>();
+            var validation = CanBidEx(playerIndex, levelRank, attemptCards);
+            if (!validation.Success)
+                return validation;
 
-            // 检查是否为级牌
-            bool allLevelCards = true;
-            Suit? suit = null;
-            foreach (var card in cards)
-            {
-                if (card.Rank != levelRank)
-                {
-                    allLevelCards = false;
-                    break;
-                }
-                if (suit == null)
-                    suit = card.Suit;
-                else if (suit != card.Suit)
-                    return OperationResult.Fail(ReasonCodes.BidNotLevelCard);
-            }
+            var inspect = InspectBid(levelRank, attemptCards);
+            if (!inspect.Success || inspect.Suit == null)
+                return OperationResult.Fail(inspect.ReasonCode ?? ReasonCodes.UnknownError);
 
-            if (!allLevelCards)
-                return OperationResult.Fail(ReasonCodes.BidNotLevelCard);
-
-            int bidLevel = cards.Count == 1 ? 0 : cards.Count == 2 ? 1 : 2;
-
-            // 检查是否可以反主
-            if (_trumpSuit != null)
-            {
-                // 必须级别更高才能反
-                if (bidLevel <= _trumpLevel)
-                    return OperationResult.Fail(ReasonCodes.BidPriorityTooLow);
-            }
-
-            _trumpSuit = suit;
+            _trumpSuit = inspect.Suit;
             _trumpPlayer = playerIndex;
-            _trumpLevel = bidLevel;
+            _trumpLevel = inspect.BidLevel;
             return OperationResult.Ok;
         }
 
@@ -75,6 +73,27 @@ namespace TractorGame.Core.GameFlow
         {
             _trumpSuit = suit;
             _trumpLevel = 2;
+        }
+
+        private static (bool Success, Suit? Suit, int BidLevel, string? ReasonCode) InspectBid(Rank levelRank, List<Card> cards)
+        {
+            if (cards.Count == 0)
+                return (false, null, 0, ReasonCodes.BidNotLevelCard);
+
+            Suit? suit = null;
+            foreach (var card in cards)
+            {
+                if (card.Rank != levelRank)
+                    return (false, null, 0, ReasonCodes.BidNotLevelCard);
+
+                if (suit == null)
+                    suit = card.Suit;
+                else if (suit != card.Suit)
+                    return (false, null, 0, ReasonCodes.BidNotLevelCard);
+            }
+
+            int bidLevel = cards.Count == 1 ? 0 : cards.Count == 2 ? 1 : 2;
+            return (true, suit, bidLevel, null);
         }
     }
 }

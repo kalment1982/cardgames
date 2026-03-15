@@ -9,6 +9,16 @@ namespace TractorGame.Tests
 {
     public class AIPlayerTests
     {
+        private static AIPlayer CreateDeterministicHardAi(GameConfig config, int seed = 1)
+        {
+            var strategy = AIStrategyParameters.CreatePreset(AIDifficulty.Hard);
+            strategy.EasyRandomnessRate = 0;
+            strategy.MediumRandomnessRate = 0;
+            strategy.HardRandomnessRate = 0;
+            strategy.ExpertRandomnessRate = 0;
+            return new AIPlayer(config, AIDifficulty.Hard, seed, strategy);
+        }
+
         [Fact]
         public void Lead_ReturnsThrow_WhenCanThrowSameSuit()
         {
@@ -179,6 +189,136 @@ namespace TractorGame.Tests
             var totalPoints = result.Select(c => c.Rank == Rank.King || c.Rank == Rank.Ten ? 10 :
                                               c.Rank == Rank.Five ? 5 : 0).Sum();
             Assert.True(totalPoints > 0);
+        }
+
+        [Fact]
+        public void Follow_CannotBeatPairWithShortage_DoesNotWasteTrumpCut()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var ai = CreateDeterministicHardAi(config);
+            var hand = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Eight),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Heart, Rank.Five)
+            };
+            var leadCards = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Seven),
+                new Card(Suit.Diamond, Rank.Seven)
+            };
+
+            var result = ai.Follow(hand, leadCards,
+                currentWinningCards: leadCards,
+                role: AIRole.Opponent,
+                partnerWinning: false);
+
+            Assert.Equal(2, result.Count);
+            Assert.Contains(result, c => c.Suit == Suit.Diamond && c.Rank == Rank.Eight);
+            Assert.Contains(result, c => c.Suit == Suit.Heart && c.Rank == Rank.Five);
+            Assert.DoesNotContain(result, c => c.Rank == Rank.SmallJoker);
+        }
+
+        [Fact]
+        public void Follow_CannotWin_PrefersSmallerPair()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var ai = CreateDeterministicHardAi(config);
+            var hand = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Three),
+                new Card(Suit.Diamond, Rank.Three),
+                new Card(Suit.Diamond, Rank.Eight),
+                new Card(Suit.Diamond, Rank.Eight)
+            };
+            var leadCards = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Seven),
+                new Card(Suit.Diamond, Rank.Seven)
+            };
+            var currentWinningCards = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Ace)
+            };
+
+            var result = ai.Follow(hand, leadCards,
+                currentWinningCards: currentWinningCards,
+                role: AIRole.Opponent,
+                partnerWinning: false);
+
+            Assert.Equal(2, result.Count);
+            Assert.All(result, c => Assert.Equal(Suit.Diamond, c.Suit));
+            Assert.All(result, c => Assert.Equal(Rank.Three, c.Rank));
+        }
+
+        [Fact]
+        public void Follow_PartnerWinning_PrefersSmallerPair_WhenPointsEqual()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var ai = CreateDeterministicHardAi(config);
+            var hand = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Three),
+                new Card(Suit.Club, Rank.Three),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.SmallJoker)
+            };
+            var leadCards = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Seven),
+                new Card(Suit.Club, Rank.Seven)
+            };
+            var currentWinningCards = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Ace),
+                new Card(Suit.Club, Rank.Ace)
+            };
+
+            var result = ai.Follow(hand, leadCards,
+                currentWinningCards: currentWinningCards,
+                role: AIRole.Opponent,
+                partnerWinning: true);
+
+            Assert.Equal(2, result.Count);
+            Assert.All(result, c => Assert.Equal(Suit.Club, c.Suit));
+            Assert.All(result, c => Assert.Equal(Rank.Three, c.Rank));
+        }
+
+        [Fact]
+        public void Follow_Hard_DoesNotRandomlyWasteBigTrump_WhenCannotBeatCurrentWinner()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Spade };
+            var strategy = AIStrategyParameters.CreatePreset(AIDifficulty.Hard);
+            strategy.HardRandomnessRate = 1.0; // 若仍允许Hard随机，将高概率出现浪费大王
+
+            for (int seed = 1; seed <= 12; seed++)
+            {
+                var ai = new AIPlayer(config, AIDifficulty.Hard, seed, strategy);
+                var hand = new List<Card>
+                {
+                    new Card(Suit.Joker, Rank.BigJoker),
+                    new Card(Suit.Spade, Rank.Three),
+                    new Card(Suit.Heart, Rank.Four)
+                };
+                var leadCards = new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Four)
+                };
+                var currentWinningCards = new List<Card>
+                {
+                    new Card(Suit.Joker, Rank.BigJoker)
+                };
+
+                var result = ai.Follow(hand, leadCards,
+                    currentWinningCards: currentWinningCards,
+                    role: AIRole.Opponent,
+                    partnerWinning: false);
+
+                Assert.Single(result);
+                Assert.Equal(Suit.Spade, result[0].Suit);
+                Assert.Equal(Rank.Three, result[0].Rank);
+            }
         }
 
         [Fact]

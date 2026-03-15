@@ -76,6 +76,33 @@ namespace TractorGame.Tests
             Assert.Equal(ReasonCodes.BuryNot8Cards, result.ReasonCode);
         }
 
+        [Fact]
+        public void BidTrumpEx_LogsBidDecisionDetail_WhenProvided()
+        {
+            var sink = new InMemoryLogSink();
+            var logger = new CoreLogger(sink);
+            var game = new Game(1, logger: logger);
+            game.StartGame();
+
+            var detail = new Dictionary<string, object?>
+            {
+                ["bid_reason"] = "C2",
+                ["bid_reasons"] = new[] { "C2", "C3" },
+                ["round_luck_p"] = 0.1675,
+                ["bid_stage"] = "Early",
+                ["bid_used_luck"] = false
+            };
+
+            var result = game.BidTrumpEx(0, new List<Card> { new Card(Suit.Spade, Rank.Two) }, detail);
+
+            Assert.True(result.Success);
+            var acceptLog = sink.Entries.Last(entry => entry.Event == "trump.bid.accept");
+            Assert.Equal("C2", acceptLog.Payload["bid_reason"]);
+            Assert.Equal(0.1675, acceptLog.Payload["round_luck_p"]);
+            Assert.Equal("Early", acceptLog.Payload["bid_stage"]);
+            Assert.Equal(false, acceptLog.Payload["bid_used_luck"]);
+        }
+
         private static void DealToEnd(Game game)
         {
             while (!game.IsDealingComplete)

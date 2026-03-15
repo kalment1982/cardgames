@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.Models;
+using TractorGame.Core.Logging;
 
 namespace TractorGame.Core.Rules
 {
@@ -21,19 +22,28 @@ namespace TractorGame.Core.Rules
         /// </summary>
         public bool IsThrowSuccessful(List<Card> throwCards, List<List<Card>> followPlays)
         {
+            return AnalyzeThrow(throwCards, followPlays).Success;
+        }
+
+        /// <summary>
+        /// 分析甩牌是否被拦截；失败时返回可用于日志的 detail。
+        /// </summary>
+        public ThrowCheckResult AnalyzeThrow(List<Card> throwCards, List<List<Card>> followPlays)
+        {
             if (throwCards == null || throwCards.Count == 0)
-                return false;
+                return ThrowCheckResult.Fail();
             if (!IsSameSuitOrTrump(throwCards))
-                return false;
+                return ThrowCheckResult.Fail();
 
             if (followPlays == null || followPlays.Count == 0)
-                return true;
+                return ThrowCheckResult.Ok();
 
             var throwSuit = GetSuitOrCategory(throwCards[0]);
 
-            // 检查所有跟牌
-            foreach (var follow in followPlays)
+            // 检查所有跟牌，命中任一子结构拦截即失败
+            for (var i = 0; i < followPlays.Count; i++)
             {
+                var follow = followPlays[i];
                 if (follow == null || follow.Count == 0)
                     continue;
 
@@ -41,11 +51,16 @@ namespace TractorGame.Core.Rules
                 if (sameSuitCards.Count == 0)
                     continue;
 
-                if (CanBeatThrow(sameSuitCards, throwCards))
-                    return false;
+                if (CanBeatThrow(sameSuitCards, throwCards, out var blockDetail))
+                {
+                    var detail = blockDetail ?? new Dictionary<string, object?>();
+                    detail["throw_suit_category"] = throwSuit;
+                    detail["follower_hand_index"] = i;
+                    return ThrowCheckResult.Fail(detail);
+                }
             }
 
-            return true;
+            return ThrowCheckResult.Ok();
         }
 
         /// <summary>
@@ -53,6 +68,13 @@ namespace TractorGame.Core.Rules
         /// </summary>
         public bool CanBeatThrow(List<Card> sameSuitCards, List<Card> throwCards)
         {
+            return CanBeatThrow(sameSuitCards, throwCards, out _);
+        }
+
+        private bool CanBeatThrow(List<Card> sameSuitCards, List<Card> throwCards, out Dictionary<string, object?>? blockDetail)
+        {
+            blockDetail = null;
+
             if (sameSuitCards == null || sameSuitCards.Count == 0)
                 return false;
             if (throwCards == null || throwCards.Count == 0)
@@ -64,16 +86,24 @@ namespace TractorGame.Core.Rules
             if (throwComponents.Count == 0)
                 return false;
 
-            // 混甩按主导结构判挡：拖拉机 > 对子 > 单张
-            // 例如「AA + 单张」只比较对子能否被压制，忽略单张比较。
-            var dominantType = throwComponents
-                .OrderBy(component => GetComponentPriority(component.Type))
-                .ThenByDescending(component => component.PairCount)
-                .First()
-                .Type;
+            // v1.4+：逐子结构判定。
+            // 只要任一子结构（单牌/对子/拖拉机）可被同门同牌型更大结构拦截，即判可挡。
+            foreach (var component in throwComponents)
+            {
+                if (!CanBeatComponent(sameSuitCards, component, out var blockerCards))
+                    continue;
 
-            var dominantComponents = throwComponents.Where(component => component.Type == dominantType).ToList();
-            return dominantComponents.Any(component => CanBeatComponent(sameSuitCards, component));
+                blockDetail = new Dictionary<string, object?>
+                {
+                    ["blocked_component_type"] = component.Type.ToString(),
+                    ["blocked_component_cards"] = component.Cards.Select(c => c.ToString()).ToArray(),
+                    ["blocked_component_top"] = component.HighestCard.ToString(),
+                    ["blocking_cards"] = blockerCards.Select(c => c.ToString()).ToArray()
+                };
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -137,27 +167,52 @@ namespace TractorGame.Core.Rules
             return fallbackPlay.OrderBy(card => card, comparer).First();
         }
 
-        private bool CanBeatComponent(List<Card> sameSuitCards, ThrowComponent component)
+        private bool CanBeatComponent(List<Card> sameSuitCards, ThrowComponent component, out List<Card> blockerCards)
         {
+            blockerCards = new List<Card>();
             var comparer = new CardComparer(_config);
 
             if (component.Type == ThrowComponentType.Single)
             {
                 var bestSingle = sameSuitCards.OrderByDescending(card => card, comparer).First();
-                return comparer.Compare(bestSingle, component.HighestCard) > 0;
+                if (comparer.Compare(bestSingle, component.HighestCard) > 0)
+                {
+                    blockerCards.Add(bestSingle);
+                    return true;
+                }
+                return false;
             }
 
             if (component.Type == ThrowComponentType.Pair)
             {
                 var pairRepresentatives = GetPairRepresentatives(sameSuitCards);
-                return pairRepresentatives.Any(pair => comparer.Compare(pair, component.HighestCard) > 0);
+                var beatPair = pairRepresentatives
+                    .Where(pair => comparer.Compare(pair, component.HighestCard) > 0)
+                    .OrderBy(pair => pair, comparer)
+                    .FirstOrDefault();
+                if (beatPair != null)
+                {
+                    blockerCards.Add(beatPair);
+                    blockerCards.Add(beatPair);
+                    return true;
+                }
+                return false;
             }
 
             // 拖拉机：仅同长度拖拉机可拦截
             var followerTractors = FindAllTractors(GetPairRepresentatives(sameSuitCards));
-            return followerTractors.Any(tractor =>
-                tractor.PairCount == component.PairCount &&
-                comparer.Compare(tractor.HighestCard, component.HighestCard) > 0);
+            var beatTractor = followerTractors
+                .Where(tractor => tractor.PairCount == component.PairCount &&
+                                  comparer.Compare(tractor.HighestCard, component.HighestCard) > 0)
+                .OrderBy(tractor => tractor.HighestCard, comparer)
+                .FirstOrDefault();
+            if (beatTractor != null)
+            {
+                blockerCards.AddRange(beatTractor.Cards);
+                return true;
+            }
+
+            return false;
         }
 
         private List<ThrowComponent> DecomposeThrowComponents(List<Card> cards)
@@ -339,16 +394,6 @@ namespace TractorGame.Core.Rules
             return count;
         }
 
-        private static int GetComponentPriority(ThrowComponentType type)
-        {
-            return type switch
-            {
-                ThrowComponentType.Tractor => 0,
-                ThrowComponentType.Pair => 1,
-                _ => 2
-            };
-        }
-
         private bool IsSameSuitOrTrump(List<Card> cards)
         {
             bool allTrump = cards.All(c => _config.IsTrump(c));
@@ -393,6 +438,22 @@ namespace TractorGame.Core.Rules
                 PairCount = pairCount;
                 HighestCard = highestCard;
             }
+        }
+
+        public sealed class ThrowCheckResult
+        {
+            public bool Success { get; }
+            public Dictionary<string, object?>? Detail { get; }
+
+            private ThrowCheckResult(bool success, Dictionary<string, object?>? detail = null)
+            {
+                Success = success;
+                Detail = detail;
+            }
+
+            public static ThrowCheckResult Ok() => new(true);
+
+            public static ThrowCheckResult Fail(Dictionary<string, object?>? detail = null) => new(false, detail);
         }
     }
 }

@@ -30,6 +30,9 @@ namespace TractorGame.Core.GameFlow
         private readonly string _roundId;
 
         private List<TrickPlay> _currentTrick;
+        private readonly Dictionary<int, string> _trickFallbackPatternTypes = new();
+        private List<TrickPlay> _lastCompletedTrick = new();
+        private int _lastCompletedTrickNo;
         private int _trickLeader;
         private List<Card>? _lastTrickCards; // 最后一墩的牌（用于抠底计算）
         private int _trickNo;
@@ -38,11 +41,17 @@ namespace TractorGame.Core.GameFlow
 
         public GameState State => _state;
         public List<TrickPlay> CurrentTrick => _currentTrick;
+        public List<TrickPlay> LastCompletedTrick => CloneTrickPlays(_lastCompletedTrick);
+        public int LastCompletedTrickNo => _lastCompletedTrickNo;
         public string SessionId => _sessionId;
         public string GameId => _gameId;
         public string RoundId => _roundId;
         public bool IsDealingComplete => _dealing != null && _dealing.IsComplete;
         public DealStepResult? LastDealStep => _lastDealStep;
+        public List<Card> BottomCardsSnapshot => _burying?.BottomCards ?? _dealing?.GetBottomCards() ?? new List<Card>();
+        public Suit? CurrentBidSuit => _bidding?.TrumpSuit;
+        public int CurrentBidPlayer => _bidding?.TrumpPlayer ?? -1;
+        public int CurrentBidPriority => _bidding?.TrumpLevel ?? -1;
 
         public Game(
             int seed = 0,
@@ -110,15 +119,28 @@ namespace TractorGame.Core.GameFlow
             _state.DefenderScore = 0;
             _state.CurrentPlayer = _state.DealerIndex;
             _lastDealStep = null;
+            _lastCompletedTrick = new List<TrickPlay>();
+            _lastCompletedTrickNo = 0;
+            _trickFallbackPatternTypes.Clear();
 
             var from = _state.Phase;
             _state.Phase = GamePhase.Bidding;
             LogPhaseTransition(from, _state.Phase);
         }
 
-        public bool BidTrump(int playerIndex, List<Card> cards)
+        public bool BidTrump(int playerIndex, List<Card> cards, Dictionary<string, object?>? bidDetail = null)
         {
-            return BidTrumpEx(playerIndex, cards).Success;
+            return BidTrumpEx(playerIndex, cards, bidDetail).Success;
+        }
+
+        public OperationResult CanBidTrumpEx(int playerIndex, List<Card> cards)
+        {
+            if (_state.Phase != GamePhase.Bidding)
+                return OperationResult.Fail(ReasonCodes.PhaseInvalid);
+
+            var attemptCards = cards ?? new List<Card>();
+            var bidding = _bidding ?? new TrumpBidding();
+            return bidding.CanBidEx(playerIndex, _state.LevelRank, attemptCards);
         }
 
         public OperationResult DealNextCardEx()
@@ -170,24 +192,27 @@ namespace TractorGame.Core.GameFlow
             return OperationResult.Ok;
         }
 
-        public OperationResult BidTrumpEx(int playerIndex, List<Card> cards)
+        public OperationResult BidTrumpEx(int playerIndex, List<Card> cards, Dictionary<string, object?>? bidDetail = null)
         {
             var attemptCards = cards ?? new List<Card>();
+            var attemptPayload = new Dictionary<string, object?>
+            {
+                ["player_index"] = playerIndex,
+                ["cards"] = SerializeCards(attemptCards),
+                ["bid_type"] = GetBidType(attemptCards)
+            };
+            MergePayload(attemptPayload, bidDetail);
+
             LogEvent(
                 LogCategories.Audit,
                 LogLevels.Info,
                 "trump.bid.attempt",
                 $"player_{playerIndex}",
-                new Dictionary<string, object?>
-                {
-                    ["player_index"] = playerIndex,
-                    ["cards"] = SerializeCards(attemptCards),
-                    ["bid_type"] = GetBidType(attemptCards)
-                });
+                attemptPayload);
 
             if (_state.Phase != GamePhase.Bidding)
             {
-                LogTrumpBidReject(playerIndex, attemptCards, ReasonCodes.PhaseInvalid);
+                LogTrumpBidReject(playerIndex, attemptCards, ReasonCodes.PhaseInvalid, bidDetail);
                 return OperationResult.Fail(ReasonCodes.PhaseInvalid);
             }
 
@@ -195,21 +220,24 @@ namespace TractorGame.Core.GameFlow
             var result = _bidding.TryBidEx(playerIndex, _state.LevelRank, attemptCards);
             if (!result.Success)
             {
-                LogTrumpBidReject(playerIndex, attemptCards, result.ReasonCode ?? ReasonCodes.UnknownError);
+                LogTrumpBidReject(playerIndex, attemptCards, result.ReasonCode ?? ReasonCodes.UnknownError, bidDetail);
                 return result;
             }
+
+            var acceptPayload = new Dictionary<string, object?>
+            {
+                ["player_index"] = playerIndex,
+                ["trump_suit"] = _bidding.TrumpSuit?.ToString() ?? "Spade",
+                ["bid_priority"] = GetBidPriority(attemptCards)
+            };
+            MergePayload(acceptPayload, bidDetail);
 
             LogEvent(
                 LogCategories.Audit,
                 LogLevels.Info,
                 "trump.bid.accept",
                 $"player_{playerIndex}",
-                new Dictionary<string, object?>
-                {
-                    ["player_index"] = playerIndex,
-                    ["trump_suit"] = _bidding.TrumpSuit?.ToString() ?? "Spade",
-                    ["bid_priority"] = GetBidPriority(attemptCards)
-                });
+                acceptPayload);
 
             return OperationResult.Ok;
         }
@@ -432,8 +460,8 @@ namespace TractorGame.Core.GameFlow
                         validatorElapsedMs);
 
                     var throwValidator = new ThrowValidator(_config);
-                    var fallbackCard = throwValidator.GetSmallestCard(selectedCards);
-                    if (fallbackCard == null)
+                    var fallbackPlay = throwValidator.GetFallbackPlay(selectedCards);
+                    if (fallbackPlay.Count == 0)
                     {
                         return LogPlayReject(
                             playerIndex,
@@ -442,7 +470,9 @@ namespace TractorGame.Core.GameFlow
                             validatorElapsedMs);
                     }
 
-                    selectedCards = new List<Card> { fallbackCard };
+                    selectedCards = fallbackPlay;
+                    var fallbackPatternType = new CardPattern(selectedCards, _config).Type.ToString();
+                    _trickFallbackPatternTypes[playerIndex] = fallbackPatternType;
 
                     LogEvent(
                         LogCategories.Audit,
@@ -455,8 +485,18 @@ namespace TractorGame.Core.GameFlow
                             ["reason_code"] = ReasonCodes.ThrowNotMax,
                             ["attempted_cards"] = SerializeCards(cards ?? new List<Card>()),
                             ["fallback_cards"] = SerializeCards(selectedCards),
+                            ["fallback_pattern_type"] = fallbackPatternType,
                             ["throw_fail_penalty"] = _config.ThrowFailPenalty
                         });
+                    if (validResult.Detail != null)
+                    {
+                        LogEvent(
+                            LogCategories.Audit,
+                            LogLevels.Info,
+                            "play.throw.blocked_detail",
+                            actor,
+                            new Dictionary<string, object?>(validResult.Detail));
+                    }
 
                     ApplyThrowFailPenalty(playerIndex);
                     validResult = OperationResult.Ok;
@@ -541,9 +581,7 @@ namespace TractorGame.Core.GameFlow
 
         private void FinishTrick()
         {
-            var trickSnapshot = _currentTrick
-                .Select(p => new TrickPlay(p.PlayerIndex, new List<Card>(p.Cards)))
-                .ToList();
+            var trickSnapshot = CloneTrickPlays(_currentTrick);
 
             int winner = _judge.DetermineWinner(_currentTrick);
 
@@ -587,6 +625,8 @@ namespace TractorGame.Core.GameFlow
                 new Dictionary<string, object?>
                 {
                     ["trick_no"] = _trickNo,
+                    ["level_rank"] = _state.LevelRank.ToString(),
+                    ["trump_suit"] = _state.TrumpSuit?.ToString() ?? Suit.Spade.ToString(),
                     ["trick_cards"] = SerializePlays(trickSnapshot),
                     ["winner_index"] = winner,
                     ["trick_score"] = score,
@@ -598,8 +638,11 @@ namespace TractorGame.Core.GameFlow
 
             // 保存最后一墩首张牌（用于抠底倍数计算）
             _lastTrickCards = new List<Card>(_currentTrick[0].Cards);
+            _lastCompletedTrick = CloneTrickPlays(trickSnapshot);
+            _lastCompletedTrickNo = _trickNo;
 
             _currentTrick.Clear();
+            _trickFallbackPatternTypes.Clear();
             _state.CurrentPlayer = winner;
             _trickLeader = winner;
 
@@ -724,19 +767,31 @@ namespace TractorGame.Core.GameFlow
                 payload);
         }
 
-        private void LogTrumpBidReject(int playerIndex, List<Card> cards, string reasonCode)
+        private void LogTrumpBidReject(int playerIndex, List<Card> cards, string reasonCode, Dictionary<string, object?>? bidDetail = null)
         {
+            var payload = new Dictionary<string, object?>
+            {
+                ["player_index"] = playerIndex,
+                ["cards"] = SerializeCards(cards),
+                ["reason_code"] = reasonCode
+            };
+            MergePayload(payload, bidDetail);
+
             LogEvent(
                 LogCategories.Audit,
                 LogLevels.Warn,
                 "trump.bid.reject",
                 $"player_{playerIndex}",
-                new Dictionary<string, object?>
-                {
-                    ["player_index"] = playerIndex,
-                    ["cards"] = SerializeCards(cards),
-                    ["reason_code"] = reasonCode
-                });
+                payload);
+        }
+
+        private static void MergePayload(Dictionary<string, object?> payload, Dictionary<string, object?>? extra)
+        {
+            if (extra == null || extra.Count == 0)
+                return;
+
+            foreach (var entry in extra)
+                payload[entry.Key] = entry.Value;
         }
 
         private void LogBuryReject(List<Card> cards, string reasonCode)
@@ -871,7 +926,10 @@ namespace TractorGame.Core.GameFlow
                     ["category"] = category,
                     ["pattern"] = pattern,
                     ["top_card"] = topCard?.ToString() ?? string.Empty,
-                    ["cards_score"] = p.Cards.Sum(c => c.Score)
+                    ["cards_score"] = p.Cards.Sum(c => c.Score),
+                    ["fallback_pattern_type"] = _trickFallbackPatternTypes.TryGetValue(p.PlayerIndex, out var fallbackPatternType)
+                        ? fallbackPatternType
+                        : string.Empty
                 };
             }).ToList();
         }
@@ -955,6 +1013,11 @@ namespace TractorGame.Core.GameFlow
         private static string GenerateId(string prefix)
         {
             return $"{prefix}_{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N")[..6]}";
+        }
+
+        private static List<TrickPlay> CloneTrickPlays(IEnumerable<TrickPlay> plays)
+        {
+            return plays.Select(p => new TrickPlay(p.PlayerIndex, new List<Card>(p.Cards))).ToList();
         }
     }
 }

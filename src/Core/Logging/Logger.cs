@@ -242,8 +242,9 @@ namespace TractorGame.Core.Logging
 
         public void Write(LogEntry entry)
         {
-            var ts = entry.TsUtc.Kind == DateTimeKind.Utc ? entry.TsUtc : entry.TsUtc.ToUniversalTime();
-            var filePath = GetFilePath(entry, ts);
+            var tsUtc = entry.TsUtc.Kind == DateTimeKind.Utc ? entry.TsUtc : entry.TsUtc.ToUniversalTime();
+            var tsLocal = tsUtc.ToLocalTime();
+            var filePath = GetFilePath(entry, tsUtc);
 
             lock (_syncRoot)
             {
@@ -252,14 +253,14 @@ namespace TractorGame.Core.Logging
                 if (!_startedFiles.Contains(filePath))
                 {
                     _startedFiles.Add(filePath);
-                    File.AppendAllText(filePath, BuildGameHeader(entry, ts), Encoding.UTF8);
+                    File.AppendAllText(filePath, BuildGameHeader(entry, tsLocal), Encoding.UTF8);
                 }
 
-                var md = BuildEventMarkdown(entry, ts);
+                var md = BuildEventMarkdown(entry, tsLocal);
                 if (!string.IsNullOrWhiteSpace(md))
                     File.AppendAllText(filePath, md, Encoding.UTF8);
 
-                var textLine = BuildTextTimelineLine(entry, ts);
+                var textLine = BuildTextTimelineLine(entry, tsLocal);
                 if (!string.IsNullOrWhiteSpace(textLine))
                 {
                     if (!_timelineStartedFiles.Contains(filePath))
@@ -283,12 +284,12 @@ namespace TractorGame.Core.Logging
             return Path.Combine(dir, $"{_filePrefix}-{gameToken}.md");
         }
 
-        private static string BuildGameHeader(LogEntry entry, DateTime tsUtc)
+        private static string BuildGameHeader(LogEntry entry, DateTime tsLocal)
         {
             var sb = new StringBuilder();
             sb.AppendLine();
             sb.AppendLine("---");
-            sb.AppendLine($"# 拖拉机对局回放 ({tsUtc:yyyy-MM-dd HH:mm:ss} UTC)");
+            sb.AppendLine($"# 拖拉机对局回放 ({tsLocal:yyyy-MM-dd HH:mm:ss} 本地时间)");
             sb.AppendLine($"- game_id: `{entry.GameId ?? "unknown"}`");
             sb.AppendLine($"- round_id: `{entry.RoundId ?? "unknown"}`");
             sb.AppendLine($"- session_id: `{entry.SessionId ?? "unknown"}`");
@@ -296,136 +297,148 @@ namespace TractorGame.Core.Logging
             return sb.ToString();
         }
 
-        private static string BuildEventMarkdown(LogEntry entry, DateTime tsUtc)
+        private static string BuildEventMarkdown(LogEntry entry, DateTime tsLocal)
         {
             return entry.Event switch
             {
-                "trump.finalized" => BuildTrumpMarkdown(entry, tsUtc),
-                "turn.start" => BuildTurnStartMarkdown(entry, tsUtc),
-                "trick.finish" => BuildTrickFinishMarkdown(entry, tsUtc),
-                "round.finish" => BuildRoundFinishMarkdown(entry, tsUtc),
+                "trump.finalized" => BuildTrumpMarkdown(entry, tsLocal),
+                "turn.start" => BuildTurnStartMarkdown(entry, tsLocal),
+                "trick.finish" => BuildTrickFinishMarkdown(entry, tsLocal),
+                "round.finish" => BuildRoundFinishMarkdown(entry, tsLocal),
                 _ => string.Empty
             };
         }
 
-        private static string BuildTrumpMarkdown(LogEntry entry, DateTime tsUtc)
+        private static string BuildTrumpMarkdown(LogEntry entry, DateTime tsLocal)
         {
-            var trumpSuit = PayloadString(entry, "trump_suit");
-            var trumpPlayer = PayloadString(entry, "trump_player");
+            var trumpSuit = PayloadStringAny(entry, "trump_suit", "trumpSuit", "suit");
+            var trumpPlayer = PayloadStringAny(entry, "trump_player", "trumpPlayer", "player_index", "playerIndex");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"## 亮主信息 ({tsUtc:HH:mm:ss})");
-            sb.AppendLine($"- 主花色: `{trumpSuit}`");
-            sb.AppendLine($"- 亮主玩家: `player_{trumpPlayer}`");
+            sb.AppendLine($"## 亮主信息 ({tsLocal:HH:mm:ss})");
+            sb.AppendLine($"- 主花色: `{SuitDisplay(trumpSuit)}`");
+            sb.AppendLine($"- 亮主玩家: `{PlayerLabel(trumpPlayer)}`");
             sb.AppendLine();
             return sb.ToString();
         }
 
-        private static string BuildTurnStartMarkdown(LogEntry entry, DateTime tsUtc)
+        private static string BuildTurnStartMarkdown(LogEntry entry, DateTime tsLocal)
         {
             if (!PayloadBool(entry, "is_lead"))
                 return string.Empty;
 
-            var trickNo = PayloadString(entry, "trick_no");
-            var levelRank = PayloadString(entry, "level_rank");
-            var trumpSuit = PayloadString(entry, "trump_suit");
-            var dealerIndex = PayloadString(entry, "dealer_index");
-            var defenderScore = PayloadString(entry, "defender_score");
-            var leadPlayer = PayloadString(entry, "lead_player");
+            var trickNo = PayloadStringAny(entry, "trick_no", "trickNo");
+            var levelRank = PayloadStringAny(entry, "level_rank", "levelRank");
+            var trumpSuit = PayloadStringAny(entry, "trump_suit", "trumpSuit");
+            var dealerIndex = PayloadStringAny(entry, "dealer_index", "dealerIndex");
+            var defenderScore = PayloadStringAny(entry, "defender_score", "defenderScore");
+            var leadPlayer = PayloadStringAny(entry, "lead_player", "leadPlayer");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"## 第 {trickNo} 墩 ({tsUtc:HH:mm:ss})");
-            sb.AppendLine($"- 打级: `{levelRank}`");
-            sb.AppendLine($"- 主花色: `{trumpSuit}`");
-            sb.AppendLine($"- 庄家: `player_{dealerIndex}`");
-            sb.AppendLine($"- 首出玩家: `player_{leadPlayer}`");
+            sb.AppendLine($"## 第 {trickNo} 墩 ({tsLocal:HH:mm:ss})");
+            sb.AppendLine($"- 打级: `{RankDisplay(levelRank)}`");
+            sb.AppendLine($"- 主花色: `{SuitDisplay(trumpSuit)}`");
+            sb.AppendLine($"- 庄家: `{PlayerLabel(dealerIndex)}`");
+            sb.AppendLine($"- 首出玩家: `{PlayerLabel(leadPlayer)}`");
             sb.AppendLine($"- 当前闲家分: `{defenderScore}`");
             sb.AppendLine();
             sb.AppendLine("### 四家手牌（出牌前）");
-            sb.AppendLine("| 玩家 | 手牌数 | 手牌 |");
+            sb.AppendLine("| 玩家 | 手牌数 | 手牌（人性化分组） |");
             sb.AppendLine("|---|---:|---|");
 
             var hands = PayloadArray(entry, "hands_before_trick");
             foreach (var hand in hands)
             {
-                var player = PropertyString(hand, "player_index");
-                var count = PropertyString(hand, "hand_count");
-                var cards = string.Join(" ", CardTexts(PropertyArray(hand, "cards")));
-                sb.AppendLine($"| player_{EscapeMd(player)} | {EscapeMd(count)} | {EscapeMd(cards)} |");
+                var player = PropertyStringAny(hand, "player_index", "playerIndex");
+                var count = PropertyStringAny(hand, "hand_count", "handCount");
+                var cards = PropertyArrayAny(hand, "cards");
+                var grouped = HumanizeCards(cards, levelRank, trumpSuit);
+                sb.AppendLine($"| {EscapeMd(PlayerLabel(player))} | {EscapeMd(count)} | {EscapeMd(grouped)} |");
             }
             sb.AppendLine();
             return sb.ToString();
         }
 
-        private static string BuildTrickFinishMarkdown(LogEntry entry, DateTime tsUtc)
+        private static string BuildTrickFinishMarkdown(LogEntry entry, DateTime tsLocal)
         {
-            var trickNo = PayloadString(entry, "trick_no");
-            var winner = PayloadString(entry, "winner_index");
-            var trickScore = PayloadString(entry, "trick_score");
-            var before = PayloadString(entry, "defender_score_before");
-            var after = PayloadString(entry, "defender_score_after");
+            var trickNo = PayloadStringAny(entry, "trick_no", "trickNo", "trickIndex");
+            var winner = PayloadStringAny(entry, "winner_index", "winnerIndex", "winner");
+            var trickScore = PayloadStringAny(entry, "trick_score", "trickScore");
+            var before = PayloadStringAny(entry, "defender_score_before", "defenderScoreBefore");
+            var after = PayloadStringAny(entry, "defender_score_after", "defenderScoreAfter");
 
             var basis = PayloadObject(entry, "winner_basis");
             var reason = PropertyString(basis, "reason");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"### 第 {trickNo} 墩结果 ({tsUtc:HH:mm:ss})");
-            sb.AppendLine("| 玩家 | 出牌 | 牌型 | 类别 | 牌面分 |");
-            sb.AppendLine("|---|---|---|---|---:|");
+            sb.AppendLine($"### 第 {trickNo} 墩结果 ({tsLocal:HH:mm:ss})");
+            sb.AppendLine("| 玩家 | 出牌 | 牌型 | 类别 | 牌面分 | 甩牌回退 | 牌张属性 |");
+            sb.AppendLine("|---|---|---|---|---:|---|---|");
 
             var playAnalysis = PayloadArray(entry, "play_analysis");
             var playMap = playAnalysis
                 .Select(p => new
                 {
-                    Player = PropertyString(p, "player_index"),
+                    Player = PropertyStringAny(p, "player_index", "playerIndex"),
                     Pattern = PropertyString(p, "pattern"),
                     Category = PropertyString(p, "category"),
-                    Score = PropertyString(p, "cards_score")
+                    Score = PropertyStringAny(p, "cards_score", "cardsScore"),
+                    FallbackPatternType = PropertyStringAny(p, "fallback_pattern_type", "fallbackPatternType")
                 })
                 .ToDictionary(x => x.Player, x => x);
 
-            var trickCards = PayloadArray(entry, "trick_cards");
+            var trickCards = PayloadArrayAny(entry, "trick_cards", "plays");
             foreach (var play in trickCards)
             {
-                var player = PropertyString(play, "player_index");
-                var cards = string.Join(" ", CardTexts(PropertyArray(play, "cards")));
+                var player = PropertyStringAny(play, "player_index", "playerIndex");
+                var cardsEl = PropertyArrayAny(play, "cards");
+                var cards = string.Join(" ", CardDisplays(cardsEl));
                 playMap.TryGetValue(player, out var info);
                 var pattern = info?.Pattern ?? "";
                 var category = info?.Category ?? "";
-                var score = info?.Score ?? "0";
-                sb.AppendLine($"| player_{EscapeMd(player)} | {EscapeMd(cards)} | {EscapeMd(pattern)} | {EscapeMd(category)} | {EscapeMd(score)} |");
+                var score = info?.Score ?? cardsEl.Sum(c => PropertyInt(c, "score")).ToString();
+                var fallback = info?.FallbackPatternType ?? "";
+                var traits = DescribePlayTraits(
+                    cardsEl,
+                    trickCards,
+                    player,
+                    trumpSuit: PayloadStringAny(entry, "trump_suit", "trumpSuit"),
+                    levelRank: PayloadStringAny(entry, "level_rank", "levelRank"));
+                sb.AppendLine($"| {EscapeMd(PlayerLabel(player))} | {EscapeMd(cards)} | {EscapeMd(pattern)} | {EscapeMd(category)} | {EscapeMd(score)} | {EscapeMd(fallback)} | {EscapeMd(traits)} |");
             }
 
             sb.AppendLine();
-            sb.AppendLine($"- 赢家: `player_{winner}`");
+            sb.AppendLine($"- 赢家: `{PlayerLabel(winner)}`");
+            sb.AppendLine($"- 下一首出玩家 = `{PlayerLabel(winner)}`");
             sb.AppendLine($"- 本墩分数: `{trickScore}`");
             sb.AppendLine($"- 闲家分变化: `{before} -> {after}`");
-            sb.AppendLine($"- 判定依据: `{reason}`");
+            var reasonText = string.IsNullOrWhiteSpace(reason) ? "来自事件字段 winner/winnerIndex" : reason;
+            sb.AppendLine($"- 判定依据: `{reasonText}`");
             sb.AppendLine();
             return sb.ToString();
         }
 
-        private static string BuildRoundFinishMarkdown(LogEntry entry, DateTime tsUtc)
+        private static string BuildRoundFinishMarkdown(LogEntry entry, DateTime tsLocal)
         {
             var defenderScore = PayloadString(entry, "defender_score");
             var winnerSide = PayloadString(entry, "winner_side");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"## 本局结束 ({tsUtc:HH:mm:ss})");
+            sb.AppendLine($"## 本局结束 ({tsLocal:HH:mm:ss})");
             sb.AppendLine($"- 闲家总分: `{defenderScore}`");
             sb.AppendLine($"- 获胜方: `{winnerSide}`");
             sb.AppendLine();
             return sb.ToString();
         }
 
-        private static string BuildTextTimelineLine(LogEntry entry, DateTime tsUtc)
+        private static string BuildTextTimelineLine(LogEntry entry, DateTime tsLocal)
         {
             var payload = FormatPayloadInline(entry.Payload);
             var metrics = FormatMetricsInline(entry.Metrics);
 
             var parts = new List<string>
             {
-                $"- `{tsUtc:HH:mm:ss.fff}Z`",
+                $"- `{tsLocal:HH:mm:ss.fff}`",
                 $"`[{entry.Level}]`",
                 $"`{entry.Event}`"
             };
@@ -501,6 +514,17 @@ namespace TractorGame.Core.Logging
             return ToSimpleString(value);
         }
 
+        private static string PayloadStringAny(LogEntry entry, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (entry.Payload.TryGetValue(key, out var value) && value != null)
+                    return ToSimpleString(value);
+            }
+
+            return string.Empty;
+        }
+
         private static JsonElement PayloadObject(LogEntry entry, string key)
         {
             if (!entry.Payload.TryGetValue(key, out var value))
@@ -520,6 +544,18 @@ namespace TractorGame.Core.Logging
             return el.EnumerateArray().Select(x => x.Clone()).ToList();
         }
 
+        private static List<JsonElement> PayloadArrayAny(LogEntry entry, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var arr = PayloadArray(entry, key);
+                if (arr.Count > 0)
+                    return arr;
+            }
+
+            return new List<JsonElement>();
+        }
+
         private static List<JsonElement> PropertyArray(JsonElement obj, string key)
         {
             if (obj.ValueKind != JsonValueKind.Object || !obj.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Array)
@@ -528,11 +564,35 @@ namespace TractorGame.Core.Logging
             return value.EnumerateArray().Select(x => x.Clone()).ToList();
         }
 
+        private static List<JsonElement> PropertyArrayAny(JsonElement obj, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var arr = PropertyArray(obj, key);
+                if (arr.Count > 0)
+                    return arr;
+            }
+
+            return new List<JsonElement>();
+        }
+
         private static string PropertyString(JsonElement obj, string key)
         {
             if (obj.ValueKind != JsonValueKind.Object || !obj.TryGetProperty(key, out var value))
                 return string.Empty;
             return ToSimpleString(value);
+        }
+
+        private static string PropertyStringAny(JsonElement obj, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                var value = PropertyString(obj, key);
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+
+            return string.Empty;
         }
 
         private static IEnumerable<string> CardTexts(List<JsonElement> cardElements)
@@ -544,6 +604,200 @@ namespace TractorGame.Core.Logging
                     yield return text;
             }
         }
+
+        private static IEnumerable<string> CardDisplays(List<JsonElement> cardElements)
+        {
+            foreach (var card in cardElements)
+            {
+                yield return CardDisplay(card);
+            }
+        }
+
+        private static string CardDisplay(JsonElement card)
+        {
+            var rank = PropertyString(card, "rank");
+            var suit = PropertyString(card, "suit");
+            if (string.Equals(rank, "BigJoker", StringComparison.OrdinalIgnoreCase))
+                return "大🃏";
+            if (string.Equals(rank, "SmallJoker", StringComparison.OrdinalIgnoreCase))
+                return "小🃏";
+
+            return $"{SuitShort(suit)}{RankDisplay(rank)}";
+        }
+
+        private static string HumanizeCards(List<JsonElement> cards, string levelRank, string trumpSuit)
+        {
+            if (cards.Count == 0)
+                return "(空)";
+
+            var grouped = new Dictionary<string, List<string>>
+            {
+                ["主"] = new List<string>(),
+                ["♠"] = new List<string>(),
+                ["♥"] = new List<string>(),
+                ["♣"] = new List<string>(),
+                ["♦"] = new List<string>()
+            };
+
+            int scoreCards = 0;
+            int scoreSum = 0;
+            foreach (var card in cards)
+            {
+                var display = CardDisplay(card);
+                var suit = PropertyString(card, "suit");
+                var rank = PropertyString(card, "rank");
+                if (IsTrumpCard(suit, rank, trumpSuit, levelRank))
+                    grouped["主"].Add(display);
+                else
+                    grouped[SuitShort(suit)].Add(display);
+
+                var cardScore = PropertyInt(card, "score");
+                if (cardScore > 0)
+                {
+                    scoreCards++;
+                    scoreSum += cardScore;
+                }
+            }
+
+            var parts = new List<string>();
+            foreach (var key in new[] { "主", "♠", "♥", "♣", "♦" })
+            {
+                if (grouped[key].Count > 0)
+                    parts.Add($"{key}[{string.Join(" ", grouped[key])}]");
+            }
+
+            var scoreText = scoreCards > 0 ? $"分牌{scoreCards}张/{scoreSum}分" : "无分牌";
+            return $"{string.Join(" ｜ ", parts)} （共{cards.Count}张，{scoreText}）";
+        }
+
+        private static string DescribePlayTraits(List<JsonElement> cards, List<JsonElement> trickPlays, string player, string trumpSuit, string levelRank)
+        {
+            if (cards.Count == 0)
+                return string.Empty;
+
+            var traits = new List<string>();
+            if (cards.All(c => IsTrumpCard(PropertyString(c, "suit"), PropertyString(c, "rank"), trumpSuit, levelRank)))
+                traits.Add("主牌");
+            else
+                traits.Add("副牌");
+
+            if (cards.Any(c => string.Equals(PropertyString(c, "rank"), levelRank, StringComparison.OrdinalIgnoreCase)))
+                traits.Add("含级牌");
+
+            var score = cards.Sum(c => PropertyInt(c, "score"));
+            if (score > 0)
+                traits.Add($"分牌{score}分");
+
+            var firstPlayer = string.Empty;
+            var leadCategory = string.Empty;
+            if (trickPlays.Count > 0)
+            {
+                var leadPlay = trickPlays[0];
+                firstPlayer = PropertyStringAny(leadPlay, "player_index", "playerIndex");
+                var leadCards = PropertyArrayAny(leadPlay, "cards");
+                if (leadCards.Count > 0)
+                    leadCategory = CardCategory(leadCards[0], trumpSuit, levelRank);
+            }
+
+            if (string.Equals(firstPlayer, player, StringComparison.Ordinal))
+                traits.Add("首攻");
+            else
+            {
+                var selfCategory = CardCategory(cards[0], trumpSuit, levelRank);
+                traits.Add(selfCategory == leadCategory ? "跟同门" : "垫牌/毙牌");
+            }
+
+            return string.Join(" · ", traits);
+        }
+
+        private static string CardCategory(JsonElement card, string trumpSuit, string levelRank)
+        {
+            var suit = PropertyString(card, "suit");
+            var rank = PropertyString(card, "rank");
+            return IsTrumpCard(suit, rank, trumpSuit, levelRank) ? "Trump" : suit;
+        }
+
+        private static bool IsTrumpCard(string suit, string rank, string trumpSuit, string levelRank)
+        {
+            if (string.Equals(rank, "BigJoker", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(rank, "SmallJoker", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (!string.IsNullOrWhiteSpace(levelRank) &&
+                string.Equals(rank, levelRank, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return !string.IsNullOrWhiteSpace(trumpSuit) &&
+                   string.Equals(suit, trumpSuit, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int PropertyInt(JsonElement obj, string key)
+        {
+            if (obj.ValueKind != JsonValueKind.Object || !obj.TryGetProperty(key, out var value))
+                return 0;
+
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var i))
+                return i;
+
+            if (int.TryParse(ToSimpleString(value), out var parsed))
+                return parsed;
+
+            return 0;
+        }
+
+        private static string PlayerLabel(string playerIndex)
+        {
+            if (!int.TryParse(playerIndex, out var p))
+                return "未知";
+            return $"玩家{p}（{SeatName(p)}）";
+        }
+
+        private static string SeatName(int player) => player switch
+        {
+            0 => "南",
+            1 => "东",
+            2 => "北",
+            3 => "西",
+            _ => "?"
+        };
+
+        private static string SuitDisplay(string suit) => suit switch
+        {
+            "Spade" => "♠黑桃",
+            "Heart" => "♥红桃",
+            "Club" => "♣梅花",
+            "Diamond" => "♦方块",
+            _ => suit
+        };
+
+        private static string SuitShort(string suit) => suit switch
+        {
+            "Spade" => "♠",
+            "Heart" => "♥",
+            "Club" => "♣",
+            "Diamond" => "♦",
+            _ => "?"
+        };
+
+        private static string RankDisplay(string rank) => rank switch
+        {
+            "Two" => "2",
+            "Three" => "3",
+            "Four" => "4",
+            "Five" => "5",
+            "Six" => "6",
+            "Seven" => "7",
+            "Eight" => "8",
+            "Nine" => "9",
+            "Ten" => "10",
+            "Jack" => "J",
+            "Queen" => "Q",
+            "King" => "K",
+            "Ace" => "A",
+            "SmallJoker" => "小🃏",
+            "BigJoker" => "大🃏",
+            _ => rank
+        };
 
         private static JsonElement ToElement(object? value)
         {

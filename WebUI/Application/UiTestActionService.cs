@@ -21,9 +21,21 @@ public sealed class UiTestActionService
     {
         var hand = new List<Card>(vm.PlayerHand);
         var ai = new AIPlayer(config, AIDifficulty.Hard, currentSeed + actionCounter + 5000);
+        int currentPlayer = game.State.CurrentPlayer;
+        var otherPlayers = Enumerable.Range(0, 4)
+            .Where(index => index != currentPlayer)
+            .ToList();
+        var knownBottomCards = currentPlayer == game.State.DealerIndex
+            ? new List<Card>(game.State.BuriedCards)
+            : null;
 
         List<Card> selected = game.CurrentTrick.Count == 0
-            ? ai.Lead(new List<Card>(hand), role)
+            ? ai.Lead(
+                new List<Card>(hand),
+                role,
+                myPosition: currentPlayer,
+                opponentPositions: otherPlayers,
+                knownBottomCards: knownBottomCards)
             : ai.Follow(
                 new List<Card>(hand),
                 game.CurrentTrick[0].Cards,

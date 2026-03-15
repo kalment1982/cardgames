@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Logging;
@@ -8,6 +9,12 @@ namespace WebUI.Application;
 public sealed class UiTelemetryService
 {
     private readonly IGameLogger _logger = GameLoggerFactory.CreateDefault();
+    private readonly LogRelayClient _relay;
+
+    public UiTelemetryService(LogRelayClient relay)
+    {
+        _relay = relay;
+    }
 
     public void LogActionClick(Game? game, string phase, string controlId, bool enabled)
     {
@@ -46,7 +53,7 @@ public sealed class UiTelemetryService
 
     private void LogUiEvent(Game? game, string phase, string eventName, Dictionary<string, object?> payload, string level = LogLevels.Info)
     {
-        _logger.Log(new LogEntry
+        var entry = new LogEntry
         {
             Category = LogCategories.Diag,
             Level = level,
@@ -57,7 +64,14 @@ public sealed class UiTelemetryService
             Phase = phase,
             Actor = "ui",
             Payload = payload
-        });
+        };
+
+        if (OperatingSystem.IsBrowser())
+        {
+            _ = _relay.TryPostAsync(entry);
+            return;
+        }
+
+        _logger.Log(entry);
     }
 }
-

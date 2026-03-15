@@ -162,7 +162,7 @@ namespace TractorGame.Tests
         }
 
         [Fact]
-        public void IsThrowSuccessful_ReturnsTrue_WhenFollowerPairIsLower()
+        public void IsThrowSuccessful_ReturnsFalse_WhenFollowerCanBeatSingleSubComponent()
         {
             var validator = new ThrowValidator(_config);
             var throwCards = new List<Card>
@@ -183,7 +183,7 @@ namespace TractorGame.Tests
                 }
             };
 
-            Assert.True(validator.IsThrowSuccessful(throwCards, followPlays));
+            Assert.False(validator.IsThrowSuccessful(throwCards, followPlays));
         }
 
         [Fact]

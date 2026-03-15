@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using TractorGame.Core.AI;
 using TractorGame.Core.GameFlow;
@@ -36,8 +37,20 @@ public sealed class AITurnService
                 championParams  // 传入训练好的参数
             );
 
+            var otherPlayers = Enumerable.Range(0, 4)
+                .Where(index => index != aiPlayer)
+                .ToList();
+            var knownBottomCards = aiPlayer == game.State.DealerIndex
+                ? new List<Card>(game.State.BuriedCards)
+                : null;
+
             List<Card> aiCards = game.CurrentTrick.Count == 0
-                ? aiPlayerObj.Lead(aiHand, role)
+                ? aiPlayerObj.Lead(
+                    aiHand,
+                    role,
+                    myPosition: aiPlayer,
+                    opponentPositions: otherPlayers,
+                    knownBottomCards: knownBottomCards)
                 : aiPlayerObj.Follow(
                     aiHand,
                     game.CurrentTrick[0].Cards,
@@ -59,4 +72,3 @@ public sealed class AITurnService
         }
     }
 }
-

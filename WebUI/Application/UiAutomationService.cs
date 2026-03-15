@@ -14,14 +14,16 @@ public sealed class UiAutomationService
 {
     private readonly IJSRuntime _js;
     private readonly IGameLogger _logger;
+    private readonly LogRelayClient _relay;
     private bool _hooksReady;
 
     public bool IsEnabled { get; private set; }
     public int? ForcedSeed { get; private set; }
 
-    public UiAutomationService(IJSRuntime js)
+    public UiAutomationService(IJSRuntime js, LogRelayClient relay)
     {
         _js = js;
+        _relay = relay;
         _logger = GameLoggerFactory.CreateDefault();
     }
 
@@ -66,10 +68,10 @@ public sealed class UiAutomationService
 
     public async Task PushEventAsync(object payload, Game? game, string phase)
     {
+        LogMappedTestEvent(payload, game, phase);
+
         if (!IsEnabled || !_hooksReady)
             return;
-
-        LogMappedTestEvent(payload, game, phase);
 
         try
         {
@@ -126,7 +128,7 @@ public sealed class UiAutomationService
             var normalizedPayload = JsonElementToValue(element) as Dictionary<string, object?> ?? new Dictionary<string, object?>();
             normalizedPayload["raw_type"] = rawType;
 
-            _logger.Log(new LogEntry
+            var entry = new LogEntry
             {
                 Category = category,
                 Level = level,
@@ -137,7 +139,15 @@ public sealed class UiAutomationService
                 Phase = phase,
                 Actor = "ui",
                 Payload = normalizedPayload
-            });
+            };
+
+            if (OperatingSystem.IsBrowser())
+            {
+                _ = _relay.TryPostAsync(entry);
+                return;
+            }
+
+            _logger.Log(entry);
         }
         catch
         {
@@ -188,4 +198,3 @@ public sealed class UiAutomationService
             || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 }
-

@@ -92,17 +92,17 @@ namespace TractorGame.Tests
 
                 md.AppendLine("## 初始手牌");
                 md.AppendLine();
-                md.AppendLine("| 玩家 | 队伍 | 角色 | 手牌（按大小排序） |");
-                md.AppendLine("|------|------|------|-------------------|");
+                md.AppendLine("| 玩家 | 队伍 | 角色 | 手牌（人性化分组） |");
+                md.AppendLine("|------|------|------|--------------------|");
                 for (int p = 0; p < 4; p++)
                 {
                     var sorted = hands[p].OrderByDescending(c => c, comparer).ToList();
                     string team = (p % 2 == 0) ? "🔴红队" : "🔵蓝队";
                     string role = (p % 2 == dealerIndex % 2) ? "庄" : "闲";
-                    md.AppendLine($"| 玩家{p}（{SeatName(p)}） | {team} | {role} | {CardsToString(sorted)} |");
+                    md.AppendLine($"| 玩家{p}（{SeatName(p)}） | {team} | {role} | {CardsToHumanString(sorted, config)} |");
                 }
                 md.AppendLine();
-                md.AppendLine($"**底牌（庄家玩家{dealerIndex}扣入）：** {CardsToString(buried)}");
+                md.AppendLine($"**底牌（庄家玩家{dealerIndex}扣入）：** {CardsToHumanString(buried, config)}");
                 md.AppendLine();
 
                 int defenderScore = 0;
@@ -123,14 +123,14 @@ namespace TractorGame.Tests
                     md.AppendLine();
                     md.AppendLine("**出牌前各家手牌：**");
                     md.AppendLine();
-                    md.AppendLine("| 玩家 | 剩余手牌 |");
-                    md.AppendLine("|------|---------|");
+                    md.AppendLine("| 玩家 | 剩余手牌（人性化分组） |");
+                    md.AppendLine("|------|----------------------|");
                     for (int seat = 0; seat < 4; seat++)
                     {
                         int p = (currentLeader + seat) % 4;
                         var sorted = hands[p].OrderByDescending(c => c, comparer).ToList();
                         string role = SeatTag(p, dealerIndex);
-                        md.AppendLine($"| 玩家{p}（{SeatName(p)}·{role}） | {CardsToString(sorted)} |");
+                        md.AppendLine($"| 玩家{p}（{SeatName(p)}·{role}） | {CardsToHumanString(sorted, config)} |");
                     }
                     md.AppendLine();
 
@@ -159,8 +159,8 @@ namespace TractorGame.Tests
 
                     md.AppendLine("**本墩出牌：**");
                     md.AppendLine();
-                    md.AppendLine("| 出牌顺序 | 玩家 | 队伍 | 角色 | 出牌 | 备注 |");
-                    md.AppendLine("|:--------:|------|------|:----:|:----:|------|");
+                    md.AppendLine("| 出牌顺序 | 玩家 | 队伍 | 角色 | 出牌 | 牌张属性 | 备注 |");
+                    md.AppendLine("|:--------:|------|------|:----:|:----:|----------|------|");
                     for (int i = 0; i < plays.Count; i++)
                     {
                         var (p, card) = plays[i];
@@ -168,7 +168,7 @@ namespace TractorGame.Tests
                         string role = SeatTag(p, dealerIndex);
                         string note = (p == winner) ? "🏆 **赢墩**" : "";
                         if (i == 0) note = (p == winner ? "🏆 **赢墩** · 首家" : "首家");
-                        md.AppendLine($"| {i + 1} | 玩家{p}（{SeatName(p)}） | {team} | {role} | **{CardName(card)}** | {note} |");
+                        md.AppendLine($"| {i + 1} | 玩家{p}（{SeatName(p)}） | {team} | {role} | **{CardName(card)}** | {CardTraits(card, plays[0].card, config, i == 0)} | {note} |");
                     }
                     md.AppendLine();
 
@@ -312,5 +312,51 @@ namespace TractorGame.Tests
         };
 
         private static string CardsToString(List<Card> cards) => string.Join(" ", cards.Select(CardName));
+
+        private static string CardsToHumanString(List<Card> cards, GameConfig config)
+        {
+            if (cards.Count == 0)
+                return "(空)";
+
+            var trump = cards.Where(config.IsTrump).OrderByDescending(c => c, new CardComparer(config)).ToList();
+            var spades = cards.Where(c => c.Suit == Suit.Spade && !config.IsTrump(c)).OrderByDescending(c => c, new CardComparer(config)).ToList();
+            var hearts = cards.Where(c => c.Suit == Suit.Heart && !config.IsTrump(c)).OrderByDescending(c => c, new CardComparer(config)).ToList();
+            var clubs = cards.Where(c => c.Suit == Suit.Club && !config.IsTrump(c)).OrderByDescending(c => c, new CardComparer(config)).ToList();
+            var diamonds = cards.Where(c => c.Suit == Suit.Diamond && !config.IsTrump(c)).OrderByDescending(c => c, new CardComparer(config)).ToList();
+
+            var segments = new List<string>();
+            if (trump.Count > 0) segments.Add($"主[{CardsToString(trump)}]");
+            if (spades.Count > 0) segments.Add($"♠[{CardsToString(spades)}]");
+            if (hearts.Count > 0) segments.Add($"♥[{CardsToString(hearts)}]");
+            if (clubs.Count > 0) segments.Add($"♣[{CardsToString(clubs)}]");
+            if (diamonds.Count > 0) segments.Add($"♦[{CardsToString(diamonds)}]");
+
+            var scoreCards = cards.Where(c => c.Score > 0).ToList();
+            var scoreText = scoreCards.Count > 0
+                ? $"分牌{scoreCards.Count}张/{scoreCards.Sum(c => c.Score)}分"
+                : "无分牌";
+            return $"{string.Join(" ｜ ", segments)} （共{cards.Count}张，{scoreText}）";
+        }
+
+        private static string CardTraits(Card card, Card leadCard, GameConfig config, bool isLead)
+        {
+            var traits = new List<string>();
+            traits.Add(config.IsTrump(card) ? "主牌" : "副牌");
+            if (card.Rank == config.LevelRank) traits.Add("级牌");
+            if (card.Score > 0) traits.Add($"分牌{card.Score}分");
+
+            if (isLead)
+            {
+                traits.Add("首攻");
+            }
+            else
+            {
+                var leadCat = GetCat(leadCard, config);
+                var cat = GetCat(card, config);
+                traits.Add(cat == leadCat ? "跟同门" : "垫牌/毙牌");
+            }
+
+            return string.Join(" · ", traits);
+        }
     }
 }
