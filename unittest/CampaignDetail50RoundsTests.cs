@@ -14,6 +14,8 @@ namespace TractorGame.Tests
     /// <summary>
     /// 生成固定50局的详细对局文档（不提前终止）
     /// </summary>
+    [Trait("Category", "Campaign")]
+    [Trait("Category", "LongRunning")]
     public class CampaignDetail50RoundsTests
     {
         private readonly ITestOutputHelper _output;

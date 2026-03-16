@@ -523,12 +523,12 @@ namespace TractorGame.Tests
         }
 
         [Fact]
-        public void ValidatePattern_ReturnsFalse_ForNonPairTwoCards()
+        public void ValidatePattern_ReturnsTrue_ForSameSuitNonPairTwoCards()
         {
             var validator = new PlayValidator(BuildConfig());
             var cards = new List<Card> { C(Suit.Heart, Rank.King), C(Suit.Heart, Rank.Queen) };
 
-            Assert.False(validator.ValidatePattern(cards));
+            Assert.True(validator.ValidatePattern(cards));
         }
 
         [Fact]

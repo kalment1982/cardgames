@@ -42,10 +42,12 @@ namespace TractorGame.Core.Logging
             var rawRoot = GetDefaultLogRootPath();
             var repoRoot = ResolveRepoRoot();
             var replayRoot = Path.GetFullPath(Path.Combine(repoRoot, "logs", "replay"));
+            var decisionRoot = Path.GetFullPath(Path.Combine(repoRoot, "logs", "decision"));
 
             var sink = new CompositeLogSink(
                 new JsonLineLogSink(rawRoot),
-                new MarkdownReplayLogSink(replayRoot));
+                new MarkdownReplayLogSink(replayRoot),
+                new AIDecisionBundleLogSink(decisionRoot));
 
             return new CoreLogger(sink);
         }

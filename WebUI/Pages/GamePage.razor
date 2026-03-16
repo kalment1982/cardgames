@@ -20,6 +20,9 @@
 @inject UiTelemetryService UiTelemetryService
 @inject UiTestActionService UiTestActionService
 @inject TurnPlayService TurnPlayService
+@inject RuleAIOptionsProvider RuleAIOptionsProvider
+@inject AIDecisionLoggerFactory AIDecisionLoggerFactory
+@inject AIRuntimeSessionService AIRuntimeSessionService
 @inject IJSRuntime JS
 
 <div class="game-container">
@@ -229,6 +232,8 @@
     private bool _showBottomPreview;
     private List<Card> _bottomPreviewCards = new();
     private string _bottomPreviewTitle = "底牌预览";
+    private CancellationTokenSource? _bottomPreviewAutoCloseCts;
+    private const int BottomPreviewAutoCloseDelayMs = 1800;
     private bool CanPlay => Vm.SelectedCardIndices.Count > 0 && game?.State.Phase == GamePhase.Playing && game?.State.CurrentPlayer == 0;
 
     // 自动化测试状态
@@ -270,6 +275,8 @@
     public void Dispose()
     {
         MessageService.Changed -= OnMessageChanged;
+        _bottomPreviewAutoCloseCts?.Cancel();
+        _bottomPreviewAutoCloseCts?.Dispose();
         _roundTransitionCts?.Cancel();
         _roundTransitionCts?.Dispose();
         _dealingFlowCts?.Cancel();
@@ -623,6 +630,8 @@
         UpdateUI();
         ShowBottomPreview(game.State.BuriedCards, "底牌（已扣底）");
         ShowMessage("扣底成功，开始出牌");
+        await InvokeAsync(StateHasChanged);
+        _ = AutoCloseBottomPreviewAfterDelayAsync();
     }
 
     private Task ViewBottom()
@@ -1089,14 +1098,26 @@
 
         // 使用训练好的Champion参数
         var championParams = ChampionLoader.LoadChampion();
-        var aiPlayer = new AIPlayer(
-            BuildCurrentConfig(),
-            AIDifficulty.Hard,
-            CurrentSeed + dealer + 1000,
-            championParams
-        );
+        var aiPlayer = AIRuntimeSessionService.GetOrCreatePlayer(
+            game,
+            dealer,
+            index => new AIPlayer(
+                BuildCurrentConfig(),
+                AIDifficulty.Hard,
+                CurrentSeed + index + 1000,
+                championParams,
+                decisionLogger: AIDecisionLoggerFactory.Create(),
+                ruleAIOptions: RuleAIOptionsProvider.Options));
 
-        var cardsToBury = aiPlayer.BuryBottom(dealerHand);
+        var logContext = GameSessionService.BuildAIDecisionLogContext(game, dealer);
+
+        var cardsToBury = aiPlayer.BuryBottom(
+            dealerHand,
+            AIRole.Dealer,
+            new List<Card>(game.BottomCardsSnapshot),
+            logContext: logContext,
+            defenderScore: game.State.DefenderScore,
+            cardsLeftMin: dealerHand.Count);
         var buryResult = game.BuryBottomEx(cardsToBury);
         if (!buryResult.Success)
         {
@@ -1205,6 +1226,7 @@
 
     private void ShowBottomPreview(List<Card> cards, string title)
     {
+        CancelBottomPreviewAutoClose();
         _showBottomPreview = true;
         _bottomPreviewTitle = title;
         _bottomPreviewCards = new List<Card>(cards);
@@ -1212,8 +1234,37 @@
 
     private void ClearBottomPreview()
     {
+        CancelBottomPreviewAutoClose();
         _showBottomPreview = false;
         _bottomPreviewCards = new List<Card>();
+    }
+
+    private void CancelBottomPreviewAutoClose()
+    {
+        _bottomPreviewAutoCloseCts?.Cancel();
+        _bottomPreviewAutoCloseCts?.Dispose();
+        _bottomPreviewAutoCloseCts = null;
+    }
+
+    private async Task AutoCloseBottomPreviewAfterDelayAsync()
+    {
+        CancelBottomPreviewAutoClose();
+        _bottomPreviewAutoCloseCts = new CancellationTokenSource();
+        var token = _bottomPreviewAutoCloseCts.Token;
+
+        try
+        {
+            await Task.Delay(IsUiTestMode ? 50 : BottomPreviewAutoCloseDelayMs, token);
+            if (token.IsCancellationRequested || !_showBottomPreview)
+                return;
+
+            ClearBottomPreview();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException)
+        {
+            // ignore
+        }
     }
 
     private static List<TrickPlay> CloneTrick(IEnumerable<TrickPlay> trick)
@@ -1323,6 +1374,7 @@
 
         Vm.SelectedCardIndices.Clear();
         var selectedIndices = UiTestActionService.BuildAutoBurySelection(
+            game,
             Vm,
             CurrentSeed,
             BuildCurrentConfig());

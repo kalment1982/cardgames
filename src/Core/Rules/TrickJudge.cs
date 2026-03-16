@@ -86,7 +86,11 @@ namespace TractorGame.Core.Rules
             var leadOrigin = leadCategory == CardCategory.Trump ? ComponentOrigin.Trump : ComponentOrigin.Suit;
             var leadSystemCards = cards.Where(card => MatchesLeadSystem(card, leadSuit, leadCategory)).ToList();
             var suitOrTrumpComponents = DecomposeComponents(leadSystemCards, leadOrigin);
-            var trumpComponents = leadCategory == CardCategory.Trump
+
+            // 非主首发时，只有在跟牌方该门完全断门的情况下，主牌分量才可整体参与压制。
+            // 若已经跟出部分同门，再混入主牌，只是合法垫/毙，不应把缺失的同门分量补成可赢结构。
+            bool canUseTrumpToCut = leadCategory != CardCategory.Trump && leadSystemCards.Count == 0;
+            var trumpComponents = leadCategory == CardCategory.Trump || !canUseTrumpToCut
                 ? new List<ComparableComponent>()
                 : DecomposeComponents(cards.Where(_config.IsTrump).ToList(), ComponentOrigin.Trump);
 

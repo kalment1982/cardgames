@@ -46,6 +46,10 @@ namespace TractorGame.Core.GameFlow
         public string SessionId => _sessionId;
         public string GameId => _gameId;
         public string RoundId => _roundId;
+        public int CurrentTrickNo => _trickNo;
+        public int CurrentTurnNo => _turnNo;
+        public string? CurrentTrickId => _trickNo > 0 ? $"trick_{_trickNo:D4}" : null;
+        public string? CurrentTurnId => _turnNo > 0 ? $"turn_{_turnNo:D4}" : null;
         public bool IsDealingComplete => _dealing != null && _dealing.IsComplete;
         public DealStepResult? LastDealStep => _lastDealStep;
         public List<Card> BottomCardsSnapshot => _burying?.BottomCards ?? _dealing?.GetBottomCards() ?? new List<Card>();
@@ -82,6 +86,7 @@ namespace TractorGame.Core.GameFlow
 
         public void StartGame()
         {
+            SyncConfigFromState();
             _roundTimer.Restart();
             _trickNo = 0;
             _turnNo = 0;
@@ -394,6 +399,7 @@ namespace TractorGame.Core.GameFlow
 
         public OperationResult PlayCardsEx(int playerIndex, List<Card> cards)
         {
+            SyncConfigFromState();
             var selectedCards = cards ?? new List<Card>();
             var actor = $"player_{playerIndex}";
             var isLead = _currentTrick.Count == 0;
@@ -549,6 +555,12 @@ namespace TractorGame.Core.GameFlow
             }
 
             return OperationResult.Ok;
+        }
+
+        private void SyncConfigFromState()
+        {
+            _config.LevelRank = _state.LevelRank;
+            _config.TrumpSuit = _state.TrumpSuit;
         }
 
         private void ApplyThrowFailPenalty(int throwPlayerIndex)

@@ -15,6 +15,8 @@ namespace TractorGame.Tests
     /// <summary>
     /// 从2打到A的完整升级赛模拟
     /// </summary>
+    [Trait("Category", "Campaign")]
+    [Trait("Category", "LongRunning")]
     public class FullCampaignSimulationTests
     {
         private readonly ITestOutputHelper _output;

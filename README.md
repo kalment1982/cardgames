@@ -63,6 +63,33 @@ dotnet restore
 dotnet test
 ```
 
+### 快速回归
+```bash
+./scripts/test_fast.sh
+```
+
+说明：
+- 默认排除 `SelfPlay / Campaign / Benchmark / LongRunning / UI`
+- 适合日常修复单点规则、候选生成、评分器后快速验证
+
+### 标准回归
+```bash
+./scripts/test_standard.sh
+```
+
+说明：
+- 保留大多数单元测试与集成测试
+- 排除 `SelfPlay / Campaign / LongRunning / UI`
+- 适合一批改动完成后的常规回归
+
+### 重型评估
+以下测试不建议每次修改都跑，适合夜间、合并前或版本验收时执行：
+```bash
+dotnet test --filter "Category=SelfPlay"
+dotnet test --filter "Category=Benchmark"
+dotnet test --filter "Category=Campaign"
+```
+
 ### 运行特定测试
 ```bash
 dotnet test --filter "FullyQualifiedName~CardTests"

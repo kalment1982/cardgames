@@ -16,6 +16,7 @@ namespace TractorGame.Core.AI
         private readonly Dictionary<(Suit, Rank), int> _playedCards;
         private readonly Dictionary<int, HashSet<Suit>> _playerVoidSuits; // 玩家缺门记录
         private readonly Dictionary<int, HashSet<string>> _playerNoPairSystems; // 玩家在某体系下"无对子"证据
+        private readonly Dictionary<int, HashSet<string>> _playerNoTractorSystems; // 玩家在某体系下"无拖拉机"证据
         private readonly int _totalDecks = 2; // 两副牌
         private const Suit TrumpVoidMarker = (Suit)(-1);
 
@@ -25,6 +26,7 @@ namespace TractorGame.Core.AI
             _playedCards = new Dictionary<(Suit, Rank), int>();
             _playerVoidSuits = new Dictionary<int, HashSet<Suit>>();
             _playerNoPairSystems = new Dictionary<int, HashSet<string>>();
+            _playerNoTractorSystems = new Dictionary<int, HashSet<string>>();
         }
 
         /// <summary>
@@ -81,6 +83,7 @@ namespace TractorGame.Core.AI
             }
 
             TrackNoPairEvidence(plays);
+            TrackNoTractorEvidence(plays);
         }
 
         /// <summary>
@@ -124,6 +127,42 @@ namespace TractorGame.Core.AI
                 return false;
 
             return _playerVoidSuits[playerPosition].Contains(TrumpVoidMarker);
+        }
+
+        public Dictionary<string, int> GetPlayedCountSnapshot()
+        {
+            return _playedCards.ToDictionary(
+                entry => new Card(entry.Key.Item1, entry.Key.Item2).ToString(),
+                entry => entry.Value);
+        }
+
+        public Dictionary<int, List<string>> GetVoidSuitsSnapshot()
+        {
+            return _playerVoidSuits.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value
+                    .Select(suit => suit == TrumpVoidMarker ? "Trump" : suit.ToString())
+                    .OrderBy(text => text)
+                    .ToList());
+        }
+
+        public Dictionary<int, List<string>> GetNoPairEvidenceSnapshot()
+        {
+            return _playerNoPairSystems.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.OrderBy(text => text).ToList());
+        }
+
+        public Dictionary<int, List<string>> GetNoTractorEvidenceSnapshot()
+        {
+            return _playerNoTractorSystems.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.OrderBy(text => text).ToList());
+        }
+
+        public int GetPlayedTrumpCount()
+        {
+            return _playedCards.Sum(entry => _config.IsTrump(new Card(entry.Key.Item1, entry.Key.Item2)) ? entry.Value : 0);
         }
 
         /// <summary>
@@ -617,6 +656,32 @@ namespace TractorGame.Core.AI
             }
         }
 
+        private void TrackNoTractorEvidence(List<TrickPlay> plays)
+        {
+            if (plays.Count == 0)
+                return;
+
+            var leadCards = plays[0].Cards;
+            if (leadCards == null || leadCards.Count < 4 || leadCards.Count % 2 != 0)
+                return;
+
+            var pattern = new CardPattern(leadCards, _config);
+            if (!pattern.IsTractor(leadCards))
+                return;
+
+            var leadSystem = ResolveThrowSystem(leadCards[0]);
+            int expectedPairs = leadCards.Count / 2;
+            foreach (var play in plays)
+            {
+                if (play.PlayerIndex == plays[0].PlayerIndex)
+                    continue;
+
+                bool followedTractor = HasTractorInSystem(play.Cards, leadSystem, expectedPairs);
+                if (!followedTractor)
+                    MarkPlayerNoTractorEvidence(play.PlayerIndex, leadSystem.Key);
+            }
+        }
+
         private bool HasPairInSystem(List<Card> cards, ThrowSystem system)
         {
             return cards
@@ -631,6 +696,38 @@ namespace TractorGame.Core.AI
                 _playerNoPairSystems[playerPosition] = new HashSet<string>();
 
             _playerNoPairSystems[playerPosition].Add(systemKey);
+        }
+
+        private bool HasTractorInSystem(List<Card> cards, ThrowSystem system, int expectedPairs)
+        {
+            var systemCards = cards
+                .Where(card => IsCardInSystem(card, system))
+                .ToList();
+
+            if (systemCards.Count < expectedPairs * 2)
+                return false;
+
+            var comparer = new CardComparer(_config);
+            var tractor = systemCards
+                .GroupBy(card => card)
+                .Where(group => group.Count() >= 2)
+                .SelectMany(group => group.Take(2))
+                .OrderByDescending(card => card, comparer)
+                .Take(expectedPairs * 2)
+                .ToList();
+
+            if (tractor.Count != expectedPairs * 2)
+                return false;
+
+            return new CardPattern(tractor, _config).IsTractor(tractor);
+        }
+
+        private void MarkPlayerNoTractorEvidence(int playerPosition, string systemKey)
+        {
+            if (!_playerNoTractorSystems.ContainsKey(playerPosition))
+                _playerNoTractorSystems[playerPosition] = new HashSet<string>();
+
+            _playerNoTractorSystems[playerPosition].Add(systemKey);
         }
 
         private static double Clamp01(double value)
@@ -709,6 +806,7 @@ namespace TractorGame.Core.AI
             _playedCards.Clear();
             _playerVoidSuits.Clear();
             _playerNoPairSystems.Clear();
+            _playerNoTractorSystems.Clear();
         }
     }
 }

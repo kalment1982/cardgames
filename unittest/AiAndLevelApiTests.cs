@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.AI;
+using TractorGame.Core.AI.V21;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
@@ -10,6 +11,12 @@ namespace TractorGame.Tests
 {
     public class AIPlayerApiCoverageTests
     {
+        private static RuleAIOptions LegacyRuleAIOptions => new()
+        {
+            UseRuleAIV21 = false,
+            EnableShadowCompare = false
+        };
+
         [Fact]
         public void Lead_ReturnsEmpty_WhenHandEmpty()
         {
@@ -65,7 +72,7 @@ namespace TractorGame.Tests
         public void Follow_UsesTrumpToBeat_WhenNoLeadSuit()
         {
             var config = new GameConfig { LevelRank = Rank.Five, TrumpSuit = Suit.Heart };
-            var ai = new AIPlayer(config, AIDifficulty.Medium, seed: 1);
+            var ai = new AIPlayer(config, AIDifficulty.Medium, seed: 1, ruleAIOptions: LegacyRuleAIOptions);
             var hand = new List<Card>
             {
                 new Card(Suit.Heart, Rank.Ace),
@@ -120,7 +127,7 @@ namespace TractorGame.Tests
         public void BuryBottom_ReturnsSmallestEightCards()
         {
             var config = new GameConfig { LevelRank = Rank.Five, TrumpSuit = Suit.Heart };
-            var ai = new AIPlayer(config, AIDifficulty.Medium, seed: 1);
+            var ai = new AIPlayer(config, AIDifficulty.Medium, seed: 1, ruleAIOptions: LegacyRuleAIOptions);
             var hand = new List<Card>
             {
                 new Card(Suit.Spade, Rank.Ace),

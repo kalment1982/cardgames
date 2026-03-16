@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Logging;
@@ -101,6 +102,56 @@ namespace TractorGame.Tests
             Assert.Equal(0.1675, acceptLog.Payload["round_luck_p"]);
             Assert.Equal("Early", acceptLog.Payload["bid_stage"]);
             Assert.Equal(false, acceptLog.Payload["bid_used_luck"]);
+        }
+
+        [Fact]
+        public void AIDecisionBundleLogSink_WritesPrettyJsonFile()
+        {
+            var tempRoot = Path.Combine(Path.GetTempPath(), "tractor-ai-bundle-test", System.Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+
+            try
+            {
+                var logger = new CoreLogger(new AIDecisionBundleLogSink(tempRoot));
+                logger.Log(new LogEntry
+                {
+                    Category = LogCategories.Diag,
+                    Level = LogLevels.Info,
+                    Event = "ai.bundle",
+                    RoundId = "round_test",
+                    TrickId = "trick_0003",
+                    CorrelationId = "follow_p2_trick_0003_turn_0002",
+                    Payload = new Dictionary<string, object?>
+                    {
+                        ["decision_trace_id"] = "follow_p2_trick_0003_turn_0002",
+                        ["bundle_version"] = "1.0",
+                        ["bundle"] = new Dictionary<string, object?>
+                        {
+                            ["meta"] = new Dictionary<string, object?>
+                            {
+                                ["phase"] = "Follow"
+                            }
+                        }
+                    }
+                });
+
+                var expectedPath = Path.Combine(
+                    tempRoot,
+                    System.DateTime.UtcNow.ToString("yyyy-MM-dd"),
+                    "round_test",
+                    "trick_0003",
+                    "follow_p2_trick_0003_turn_0002.json");
+
+                Assert.True(File.Exists(expectedPath));
+                var json = File.ReadAllText(expectedPath);
+                Assert.Contains("\"decision_trace_id\": \"follow_p2_trick_0003_turn_0002\"", json);
+                Assert.Contains("\"bundle_version\": \"1.0\"", json);
+            }
+            finally
+            {
+                if (Directory.Exists(tempRoot))
+                    Directory.Delete(tempRoot, recursive: true);
+            }
         }
 
         private static void DealToEnd(Game game)

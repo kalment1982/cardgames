@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using TractorGame.Core.AI;
+using TractorGame.Core.AI.V21;
 using TractorGame.Core.AI.Bidding;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Logging;
@@ -81,7 +82,7 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
                 TrumpSuit = game.State.TrumpSuit ?? Suit.Spade
             };
 
-            var aiPlayers = BuildAiPlayers(aiConfig, candidateParameters, opponentParameters, candidateOnEven, seed);
+            var aiPlayers = BuildAiPlayers(aiConfig, candidateParameters, opponentParameters, candidateOnEven, seed, _decisionLogger);
             var candidateMask = Enumerable.Range(0, 4)
                 .Select(index => candidateOnEven ? index % 2 == 0 : index % 2 == 1)
                 .ToArray();
@@ -89,7 +90,10 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
             var candidateIsDealerSide = candidateParity == game.State.DealerIndex % 2;
 
             var dealer = game.State.DealerIndex;
-            var buryCards = aiPlayers[dealer].BuryBottom(game.State.PlayerHands[dealer]);
+            var buryCards = aiPlayers[dealer].BuryBottom(
+                game.State.PlayerHands[dealer],
+                AIRole.Dealer,
+                game.BottomCardsSnapshot);
             if (buryCards.Count != 8)
                 buryCards = game.State.PlayerHands[dealer].Take(8).ToList();
 
@@ -228,14 +232,15 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
             AIStrategyParameters candidateParameters,
             AIStrategyParameters opponentParameters,
             bool candidateOnEven,
-            int seed)
+            int seed,
+            IGameLogger decisionLogger)
         {
             var players = new AIPlayer[4];
             for (var i = 0; i < 4; i++)
             {
                 var isCandidate = candidateOnEven ? i % 2 == 0 : i % 2 == 1;
                 var parameters = isCandidate ? candidateParameters : opponentParameters;
-                players[i] = new AIPlayer(config, AIDifficulty.Hard, seed + i + 97, parameters);
+                players[i] = new AIPlayer(config, AIDifficulty.Hard, seed + i + 97, parameters, decisionLogger);
             }
 
             return players;
@@ -277,6 +282,15 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
             int playerIndex,
             GameConfig config)
         {
+            var logContext = new AIDecisionLogContext
+            {
+                SessionId = game.SessionId,
+                GameId = game.GameId,
+                RoundId = game.RoundId,
+                PlayerIndex = playerIndex,
+                Actor = $"player_{playerIndex}"
+            };
+
             if (game.CurrentTrick.Count == 0)
             {
                 var otherPlayers = Enumerable.Range(0, 4)
@@ -285,7 +299,7 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
                 var knownBottomCards = playerIndex == game.State.DealerIndex
                     ? new List<Card>(game.State.BuriedCards)
                     : null;
-                return ai.Lead(hand, role, playerIndex, otherPlayers, knownBottomCards);
+                return ai.Lead(hand, role, playerIndex, otherPlayers, knownBottomCards, logContext);
             }
 
             var leadCards = game.CurrentTrick[0].Cards;
@@ -304,7 +318,8 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
                 }
             }
 
-            return ai.Follow(hand, leadCards, currentWinningCards, role, partnerWinning);
+            var trickScore = game.CurrentTrick.Sum(play => play.Cards.Sum(card => card.Score));
+            return ai.Follow(hand, leadCards, currentWinningCards, role, partnerWinning, trickScore, logContext);
         }
 
         private static bool TryFallbackPlay(Game game, int playerIndex, List<Card> hand, GameConfig config)

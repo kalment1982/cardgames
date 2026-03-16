@@ -1,6 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using TractorGame.Core.AI.V21;
+using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
 
@@ -39,23 +44,59 @@ namespace TractorGame.Core.AI
     /// </summary>
     public class AIPlayer
     {
+        private const string DecisionBundleVersion = "1.0";
+        private static readonly JsonSerializerOptions StructuredPayloadJsonOptions = CreateStructuredPayloadJsonOptions();
         private readonly GameConfig _config;
         private readonly Random _random;
+        private readonly Random _telemetryRandom;
         private readonly AIDifficulty _difficulty;
         private readonly CardMemory _memory;
         private readonly AIStrategyParameters _strategy;
+        private readonly IGameLogger _decisionLogger;
+        private readonly RuleAIOptions _ruleAIOptions;
+        private readonly RuleAIContextBuilder _contextBuilder;
+        private readonly LeadPolicy2 _leadPolicy2;
+        private readonly FollowPolicy2 _followPolicy2;
+        private readonly BuryPolicy2 _buryPolicy2;
 
         public AIPlayer(
             GameConfig config,
             AIDifficulty difficulty = AIDifficulty.Medium,
             int seed = 0,
-            AIStrategyParameters? strategyParameters = null)
+            AIStrategyParameters? strategyParameters = null,
+            IGameLogger? decisionLogger = null,
+            RuleAIOptions? ruleAIOptions = null)
         {
             _config = config;
             _difficulty = difficulty;
             _random = seed > 0 ? new Random(seed) : new Random();
+            _telemetryRandom = seed > 0
+                ? new Random(unchecked(seed ^ 0x5A17B3D))
+                : new Random(Guid.NewGuid().GetHashCode());
             _memory = new CardMemory(config);
             _strategy = (strategyParameters ?? AIStrategyParameters.CreatePreset(difficulty)).Normalize();
+            _decisionLogger = decisionLogger ?? GameLoggerFactory.CreateDefault();
+            _ruleAIOptions = ruleAIOptions ?? RuleAIOptions.FromEnvironment();
+            _contextBuilder = new RuleAIContextBuilder(config, difficulty, _strategy, _memory, seed);
+
+            var intentResolver = new IntentResolver(config);
+            var actionScorer = new ActionScorer(config);
+            var explainer = new DecisionExplainer();
+            _leadPolicy2 = new LeadPolicy2(
+                new LeadCandidateGenerator(config, _memory),
+                intentResolver,
+                actionScorer,
+                explainer);
+            _followPolicy2 = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                intentResolver,
+                actionScorer,
+                explainer);
+            _buryPolicy2 = new BuryPolicy2(
+                new BuryCandidateGenerator(config),
+                intentResolver,
+                actionScorer,
+                explainer);
         }
 
         /// <summary>
@@ -110,32 +151,94 @@ namespace TractorGame.Core.AI
         /// <param name="opponentPositions">对手位置列表（用于甩牌评估）</param>
         /// <param name="knownBottomCards">当前玩家可见的底牌（通常仅庄家可见）</param>
         public List<Card> Lead(List<Card> hand, AIRole role = AIRole.Opponent,
-            int myPosition = -1, List<int>? opponentPositions = null, List<Card>? knownBottomCards = null)
+            int myPosition = -1, List<int>? opponentPositions = null, List<Card>? knownBottomCards = null,
+            AIDecisionLogContext? logContext = null)
         {
-            if (hand == null || hand.Count == 0)
-                return new List<Card>();
+            var safeHand = hand ?? new List<Card>();
+            var totalStopwatch = Stopwatch.StartNew();
 
-            // 简单难度：随机选择
-            if (_difficulty == AIDifficulty.Easy && ShouldUseRandomDecision())
+            var contextStopwatch = Stopwatch.StartNew();
+            var context = _contextBuilder.BuildLeadContext(
+                safeHand,
+                role,
+                playerIndex: myPosition,
+                dealerIndex: logContext?.DealerIndex ?? -1,
+                legalActions: null,
+                visibleBottomCards: knownBottomCards,
+                trickIndex: logContext?.TrickIndex ?? 0,
+                turnIndex: logContext?.TurnIndex ?? 0,
+                playPosition: logContext?.PlayPosition ?? 1,
+                cardsLeftMin: safeHand.Count,
+                currentWinningPlayer: logContext?.CurrentWinningPlayer ?? -1,
+                defenderScore: logContext?.DefenderScore ?? 0,
+                bottomPoints: logContext?.BottomPoints ?? knownBottomCards?.Sum(card => card.Score) ?? 0);
+            contextStopwatch.Stop();
+
+            var legacyStopwatch = Stopwatch.StartNew();
+            var legacyOutcome = LeadOldPath(safeHand, role, myPosition, opponentPositions, knownBottomCards);
+            legacyStopwatch.Stop();
+
+            var shadowStopwatch = Stopwatch.StartNew();
+            var shouldCompare = _ruleAIOptions.EnableShadowCompare && ShouldRunShadowCompare();
+            DecisionOutcome? newOutcome = null;
+            if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
             {
-                var comparer = new CardComparer(_config);
-                var validator = new PlayValidator(_config);
-                var validCards = hand.Where(c => validator.IsValidPlay(hand, new List<Card> { c })).ToList();
-                if (validCards.Count > 0)
-                    return new List<Card> { validCards[_random.Next(validCards.Count)] };
+                newOutcome = LeadNewPath(context);
             }
 
-            var cardComparer = new CardComparer(_config);
-            var playValidator = new PlayValidator(_config);
+            var decisionTraceId = ResolveDecisionTraceId(context, logContext);
+            var compareSnapshot = BuildCompareSnapshot(legacyOutcome, newOutcome, shouldCompare);
 
-            var candidates = BuildLeadCandidates(hand, cardComparer, role, myPosition, opponentPositions, knownBottomCards)
-                .Where(c => playValidator.IsValidPlay(hand, c))
-                .ToList();
+            if (compareSnapshot.ShadowCompared)
+                LogAiCompare(context, compareSnapshot, logContext, decisionTraceId);
 
-            if (candidates.Count == 0)
-                return new List<Card> { hand.OrderByDescending(c => c, cardComparer).First() };
+            shadowStopwatch.Stop();
 
-            return SelectBestLeadCandidate(candidates, cardComparer, role);
+            var selectedOutcome = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
+                ? newOutcome
+                : legacyOutcome;
+            var selectedPath = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
+                ? newOutcome.Path
+                : legacyOutcome.Path;
+
+            totalStopwatch.Stop();
+
+            LogAiDecision(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                logContext,
+                decisionTraceId);
+
+            LogAiPerf(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                shouldCompare,
+                logContext,
+                decisionTraceId);
+
+            LogAiBundle(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                logContext,
+                decisionTraceId,
+                compareSnapshot);
+
+            return new List<Card>(selectedOutcome.SelectedCards);
         }
 
         /// <summary>
@@ -149,14 +252,199 @@ namespace TractorGame.Core.AI
         public List<Card> Follow(List<Card> hand, List<Card> leadCards,
             List<Card>? currentWinningCards = null,
             AIRole role = AIRole.Opponent,
-            bool partnerWinning = false)
+            bool partnerWinning = false,
+            int trickScore = 0,
+            AIDecisionLogContext? logContext = null,
+            List<Card>? visibleBottomCards = null)
+        {
+            var safeHand = hand ?? new List<Card>();
+            var safeLeadCards = leadCards ?? new List<Card>();
+            var totalStopwatch = Stopwatch.StartNew();
+
+            var contextStopwatch = Stopwatch.StartNew();
+            var context = _contextBuilder.BuildFollowContext(
+                safeHand,
+                safeLeadCards,
+                currentWinningCards,
+                role,
+                partnerWinning,
+                trickScore,
+                cardsLeftMin: safeHand.Count,
+                playerIndex: logContext?.PlayerIndex ?? -1,
+                dealerIndex: logContext?.DealerIndex ?? -1,
+                visibleBottomCards: visibleBottomCards,
+                trickIndex: logContext?.TrickIndex ?? 0,
+                turnIndex: logContext?.TurnIndex ?? 0,
+                playPosition: logContext?.PlayPosition ?? (safeLeadCards.Count == 0 ? 0 : safeLeadCards.Count + 1),
+                currentWinningPlayer: logContext?.CurrentWinningPlayer ?? -1,
+                defenderScore: logContext?.DefenderScore ?? 0,
+                bottomPoints: logContext?.BottomPoints ?? 0);
+            contextStopwatch.Stop();
+
+            var legacyStopwatch = Stopwatch.StartNew();
+            var legacyOutcome = FollowOldPath(safeHand, safeLeadCards, currentWinningCards, role, partnerWinning);
+            legacyStopwatch.Stop();
+
+            var shadowStopwatch = Stopwatch.StartNew();
+            var shouldCompare = _ruleAIOptions.EnableShadowCompare && ShouldRunShadowCompare();
+            DecisionOutcome? newOutcome = null;
+            if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
+            {
+                newOutcome = FollowNewPath(context, safeHand, safeLeadCards, currentWinningCards, role, partnerWinning);
+            }
+
+            var decisionTraceId = ResolveDecisionTraceId(context, logContext);
+            var compareSnapshot = BuildCompareSnapshot(legacyOutcome, newOutcome, shouldCompare);
+
+            if (compareSnapshot.ShadowCompared)
+                LogAiCompare(context, compareSnapshot, logContext, decisionTraceId);
+
+            shadowStopwatch.Stop();
+
+            var selectedOutcome = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
+                ? newOutcome
+                : legacyOutcome;
+            var selectedPath = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
+                ? newOutcome.Path
+                : legacyOutcome.Path;
+
+            selectedOutcome = EnsureLegalFollowOutcome(
+                selectedOutcome,
+                safeHand,
+                safeLeadCards,
+                currentWinningCards,
+                role,
+                partnerWinning);
+            selectedPath = selectedOutcome.Path;
+
+            totalStopwatch.Stop();
+
+            LogAiDecision(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                logContext,
+                decisionTraceId);
+
+            LogAiPerf(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                shouldCompare,
+                logContext,
+                decisionTraceId);
+
+            LogAiBundle(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                logContext,
+                decisionTraceId,
+                compareSnapshot);
+
+            return new List<Card>(selectedOutcome.SelectedCards);
+        }
+
+        private DecisionOutcome LeadOldPath(List<Card> hand, AIRole role,
+            int myPosition, List<int>? opponentPositions, List<Card>? knownBottomCards)
+        {
+            if (hand == null || hand.Count == 0)
+                return CreateOutcome(
+                    PhaseKind.Lead,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    "TakeLead",
+                    "empty_hand",
+                    "legacy");
+
+            // 简单难度：随机选择
+            if (_difficulty == AIDifficulty.Easy && ShouldUseRandomDecision())
+            {
+                var comparer = new CardComparer(_config);
+                var validator = new PlayValidator(_config);
+                var validCards = hand.Where(c => validator.IsValidPlay(hand, new List<Card> { c })).ToList();
+                if (validCards.Count > 0)
+                {
+                    var selected = new List<Card> { validCards[_random.Next(validCards.Count)] };
+                    return CreateOutcome(
+                        PhaseKind.Lead,
+                        selected,
+                        validCards.Select(card => new List<Card> { card }).ToList(),
+                        "TakeLead",
+                        "easy_random_single",
+                        "legacy",
+                        "randomized");
+                }
+            }
+
+            var cardComparer = new CardComparer(_config);
+            var playValidator = new PlayValidator(_config);
+
+            var candidates = BuildLeadCandidates(hand, cardComparer, role, myPosition, opponentPositions, knownBottomCards)
+                .Where(c => playValidator.IsValidPlay(hand, c))
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                var fallback = new List<Card> { hand.OrderByDescending(c => c, cardComparer).First() };
+                return CreateOutcome(
+                    PhaseKind.Lead,
+                    fallback,
+                    new List<List<Card>> { fallback },
+                    "TakeLead",
+                    "lead_high_card_fallback",
+                    "legacy",
+                    "fallback");
+            }
+
+            var selectedCandidate = SelectBestLeadCandidate(candidates, cardComparer, role);
+            return CreateOutcome(
+                PhaseKind.Lead,
+                selectedCandidate,
+                candidates,
+                DetermineLeadIntent(selectedCandidate),
+                DetermineLeadReason(selectedCandidate),
+                "legacy");
+        }
+
+        private DecisionOutcome FollowOldPath(List<Card> hand, List<Card> leadCards,
+            List<Card>? currentWinningCards, AIRole role, bool partnerWinning)
         {
             if (hand == null || hand.Count == 0 || leadCards == null || leadCards.Count == 0)
-                return new List<Card>();
+            {
+                return CreateOutcome(
+                    PhaseKind.Follow,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    DetermineFollowIntent(partnerWinning, false),
+                    "empty_follow_input",
+                    "legacy");
+            }
 
             int need = leadCards.Count;
             if (hand.Count <= need)
-                return new List<Card>(hand);
+            {
+                return CreateOutcome(
+                    PhaseKind.Follow,
+                    new List<Card>(hand),
+                    new List<List<Card>> { new List<Card>(hand) },
+                    DetermineFollowIntent(partnerWinning, false),
+                    "follow_all_cards",
+                    "legacy",
+                    "short_hand");
+            }
 
             // 如果没有提供当前赢牌，默认为首家出牌
             if (currentWinningCards == null || currentWinningCards.Count == 0)
@@ -175,7 +463,16 @@ namespace TractorGame.Core.AI
                 {
                     var shuffled = sameCategoryCards.OrderBy(x => _random.Next()).Take(need).ToList();
                     if (validator.IsValidFollow(hand, leadCards, shuffled))
-                        return shuffled;
+                    {
+                        return CreateOutcome(
+                            PhaseKind.Follow,
+                            shuffled,
+                            new List<List<Card>> { shuffled },
+                            DetermineFollowIntent(partnerWinning, CanBeatCards(currentWinningCards, shuffled)),
+                            "easy_random_follow",
+                            "legacy",
+                            "randomized");
+                    }
                 }
             }
 
@@ -258,13 +555,1236 @@ namespace TractorGame.Core.AI
             {
                 var emergencyCandidate = BuildFallbackFollowCandidate(hand, leadCards, need, cardComparer, followValidator);
                 if (followValidator.IsValidFollow(hand, leadCards, emergencyCandidate))
-                    return emergencyCandidate;
+                {
+                    return CreateOutcome(
+                        PhaseKind.Follow,
+                        emergencyCandidate,
+                        new List<List<Card>> { emergencyCandidate },
+                        DetermineFollowIntent(partnerWinning, CanBeatCards(currentWinningCards, emergencyCandidate)),
+                        "follow_validator_fallback",
+                        "legacy",
+                        "fallback");
+                }
+
+                var exhaustiveFallback = FindExhaustiveLegalFollowCandidate(hand, leadCards, need, cardComparer, followValidator);
+                if (exhaustiveFallback != null)
+                {
+                    return CreateOutcome(
+                        PhaseKind.Follow,
+                        exhaustiveFallback,
+                        new List<List<Card>> { exhaustiveFallback },
+                        DetermineFollowIntent(partnerWinning, CanBeatCards(currentWinningCards, exhaustiveFallback)),
+                        "follow_exhaustive_fallback",
+                        "legacy",
+                        "fallback",
+                        "exhaustive");
+                }
 
                 // 最后的兜底：直接取前N张（理论上不应该到这里）
-                return hand.Take(need).ToList();
+                var finalFallback = hand.Take(need).ToList();
+                return CreateOutcome(
+                    PhaseKind.Follow,
+                    finalFallback,
+                    new List<List<Card>> { finalFallback },
+                    DetermineFollowIntent(partnerWinning, false),
+                    "follow_final_fallback",
+                    "legacy",
+                    "fallback",
+                    "unsafe_fallback");
             }
 
-            return SelectBestFollowCandidate(validCandidates, currentWinningCards, cardComparer, role, partnerWinning);
+            var selected = SelectBestFollowCandidate(validCandidates, currentWinningCards, cardComparer, role, partnerWinning);
+            return CreateOutcome(
+                PhaseKind.Follow,
+                selected,
+                validCandidates,
+                DetermineFollowIntent(partnerWinning, CanBeatCards(currentWinningCards, selected)),
+                DetermineFollowReason(partnerWinning, CanBeatCards(currentWinningCards, selected)),
+                "legacy");
+        }
+
+        private DecisionOutcome LeadNewPath(RuleAIContext context)
+        {
+            if (context.MyHand.Count == 0)
+            {
+                return CreateScoredOutcome(
+                    PhaseKind.Lead,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    "MinimizeLoss",
+                    "rule_ai_v21_empty_lead",
+                    "rule_ai_v21_lead_policy2",
+                    new List<double>(),
+                    candidateReasonCodes: null,
+                    candidateFeatures: null,
+                    explanation: null,
+                    "rule_ai_v21",
+                    "lead");
+            }
+
+            var decision = _leadPolicy2.Decide(context);
+            if (decision.SelectedCards.Count == 0)
+            {
+                var fallback = LeadOldPath(context.MyHand, context.Role, context.PlayerIndex, new List<int>(), context.VisibleBottomCards);
+                return BuildPassthroughOutcome(fallback, "rule_ai_v21_lead_fallback_to_legacy");
+            }
+
+            return CreatePolicyOutcome("rule_ai_v21_lead_policy2", decision, "rule_ai_v21", "lead", "scored");
+        }
+
+        private DecisionOutcome FollowNewPath(
+            RuleAIContext context,
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card>? currentWinningCards,
+            AIRole role,
+            bool partnerWinning)
+        {
+            if (hand == null || hand.Count == 0 || leadCards == null || leadCards.Count == 0)
+            {
+                return CreateScoredOutcome(
+                    PhaseKind.Follow,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    "MinimizeLoss",
+                    "rule_ai_v21_empty_follow",
+                    "rule_ai_v21_follow_policy2",
+                    new List<double>(),
+                    candidateReasonCodes: null,
+                    candidateFeatures: null,
+                    explanation: null,
+                    "rule_ai_v21",
+                    "follow");
+            }
+
+            var decision = _followPolicy2.Decide(context);
+            if (decision.SelectedCards.Count == 0)
+            {
+                var winningCards = currentWinningCards == null || currentWinningCards.Count == 0 ? leadCards : currentWinningCards;
+                var fallback = FollowOldPath(hand, leadCards, winningCards, role, partnerWinning);
+                return BuildPassthroughOutcome(fallback, "rule_ai_v21_follow_fallback_to_legacy");
+            }
+
+            return CreatePolicyOutcome("rule_ai_v21_follow_policy2", decision, "rule_ai_v21", "follow", "scored");
+        }
+
+        private List<List<Card>> BuildRuleAIV21FollowCandidates(
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card> currentWinningCards,
+            AIRole role,
+            bool partnerWinning,
+            CardComparer comparer,
+            FollowValidator validator)
+        {
+            int need = leadCards.Count;
+            var leadCategory = _config.GetCardCategory(leadCards[0]);
+            var leadSuit = leadCards[0].Suit;
+            var sameCategoryCards = hand.Where(card => MatchesLeadCategory(card, leadSuit, leadCategory)).ToList();
+            var candidates = new List<List<Card>>();
+
+            if (sameCategoryCards.Count >= need)
+            {
+                candidates.AddRange(BuildSameCategoryFollowCandidates(
+                    sameCategoryCards,
+                    leadCards,
+                    need,
+                    comparer,
+                    role,
+                    partnerWinning));
+
+                var structureOrdered = sameCategoryCards
+                    .OrderBy(card => EstimateSingleCardDiscardCost(sameCategoryCards, card, comparer))
+                    .ThenBy(card => card, comparer)
+                    .Take(need)
+                    .ToList();
+                if (structureOrdered.Count == need)
+                    candidates.Add(structureOrdered);
+            }
+            else
+            {
+                candidates.AddRange(BuildRuleAIV21ShortageFollowCandidates(
+                    hand,
+                    sameCategoryCards,
+                    currentWinningCards,
+                    comparer));
+            }
+
+            candidates.Add(BuildFallbackFollowCandidate(hand, leadCards, need, comparer, validator));
+
+            return DeduplicateCandidates(candidates)
+                .Where(candidate => candidate.Count == need && validator.IsValidFollow(hand, leadCards, candidate))
+                .ToList();
+        }
+
+        private List<List<Card>> BuildRuleAIV21ShortageFollowCandidates(
+            List<Card> hand,
+            List<Card> sameCategoryCards,
+            List<Card> currentWinningCards,
+            CardComparer comparer)
+        {
+            var candidates = new List<List<Card>>();
+            int need = currentWinningCards.Count;
+            var mustFollow = sameCategoryCards.OrderByDescending(card => card, comparer).ToList();
+            int missing = need - mustFollow.Count;
+            var remaining = RemoveCards(hand, mustFollow);
+
+            if (missing <= 0)
+                return candidates;
+
+            candidates.Add(AppendFiller(mustFollow, remaining.OrderBy(card => card, comparer).ToList(), missing));
+
+            var pointFirst = remaining
+                .OrderByDescending(GetCardPoints)
+                .ThenBy(card => card, comparer)
+                .ToList();
+            candidates.Add(AppendFiller(mustFollow, pointFirst, missing));
+
+            var preserveStructure = remaining
+                .OrderBy(card => EstimateSingleCardDiscardCost(remaining, card, comparer))
+                .ThenBy(card => card, comparer)
+                .ToList();
+            candidates.Add(AppendFiller(mustFollow, preserveStructure, missing));
+
+            var nonTrumpFirst = remaining
+                .OrderBy(card => _config.IsTrump(card) ? 1 : 0)
+                .ThenBy(card => EstimateSingleCardDiscardCost(remaining, card, comparer))
+                .ThenBy(card => card, comparer)
+                .ToList();
+            candidates.Add(AppendFiller(mustFollow, nonTrumpFirst, missing));
+
+            var trumpCards = remaining.Where(_config.IsTrump).OrderBy(card => card, comparer).ToList();
+            for (int trumpCount = 1; trumpCount <= System.Math.Min(missing, trumpCards.Count); trumpCount++)
+            {
+                var trumpAttempt = trumpCards.Take(trumpCount).ToList();
+                var remainder = RemoveCards(remaining, trumpAttempt)
+                    .OrderBy(card => card, comparer)
+                    .ToList();
+                var candidate = AppendFiller(mustFollow, trumpAttempt.Concat(remainder).ToList(), missing);
+                if (candidate.Count == need && CanBeatCards(currentWinningCards, candidate))
+                    candidates.Add(candidate);
+            }
+
+            return candidates;
+        }
+
+        private string ResolveRuleAIV21FollowIntent(
+            RuleAIContext context,
+            List<List<Card>> candidates,
+            List<Card> currentWinningCards)
+        {
+            if (context.PartnerWinning)
+                return "PassToMate";
+
+            var winningCandidates = candidates
+                .Where(candidate => CanBeatCards(currentWinningCards, candidate))
+                .ToList();
+            if (winningCandidates.Count == 0)
+                return "MinimizeLoss";
+
+            var cheapestWinningCandidate = winningCandidates
+                .OrderBy(candidate => candidate.Count(_config.IsTrump))
+                .ThenBy(candidate => CalculateWinMargin(candidate, currentWinningCards, new CardComparer(_config)))
+                .First();
+
+            if (context.TrickScore >= 10)
+                return "TakeScore";
+
+            if (cheapestWinningCandidate.Count(_config.IsTrump) == 0)
+                return "TakeScore";
+
+            return "MinimizeLoss";
+        }
+
+        private CandidateEvaluation ScoreRuleAIV21FollowCandidate(
+            RuleAIContext context,
+            List<Card> candidate,
+            List<Card> currentWinningCards,
+            string intent,
+            CardComparer comparer)
+        {
+            bool canBeat = CanBeatCards(currentWinningCards, candidate);
+            int points = candidate.Sum(GetCardPoints);
+            int trumpCount = candidate.Count(_config.IsTrump);
+            int structureLoss = EstimateStructureLoss(context.MyHand, candidate, comparer);
+            int averageValue = candidate.Count == 0 ? 0 : (int)candidate.Average(GetCardValue);
+            int winMargin = canBeat ? CalculateWinMargin(candidate, currentWinningCards, comparer) : 0;
+            double normalizedWinMargin = NormalizeWinMargin(winMargin);
+
+            double score;
+            string reason;
+
+            if (intent == "PassToMate")
+            {
+                score = 20
+                    + points * 6.0
+                    - (canBeat ? 120.0 : 0.0)
+                    - trumpCount * 10.0
+                    - structureLoss * 3.5
+                    - averageValue / 25.0;
+                reason = canBeat
+                    ? "pass_to_mate_avoid_overtake"
+                    : points > 0
+                        ? "pass_to_mate_send_points"
+                        : "pass_to_mate_keep_power";
+            }
+            else if (intent == "TakeScore")
+            {
+                score = (canBeat ? 60.0 : -25.0)
+                    + context.TrickScore * (canBeat ? 4.0 : -1.5)
+                    - trumpCount * 9.0
+                    - structureLoss * 4.0
+                    - averageValue / 30.0
+                    - normalizedWinMargin
+                    - (!canBeat ? points * 1.2 : 0.0);
+                reason = canBeat
+                    ? "take_score_low_cost_win"
+                    : "take_score_cannot_secure";
+            }
+            else
+            {
+                score = (canBeat
+                        ? (context.TrickScore >= 15 ? 18.0 : -18.0)
+                        : 12.0)
+                    - points * 2.0
+                    - trumpCount * 8.0
+                    - structureLoss * 4.5
+                    - averageValue / 20.0
+                    - (canBeat ? normalizedWinMargin * 1.2 : 0.0);
+                reason = canBeat
+                    ? "minimize_loss_decline_expensive_win"
+                    : "minimize_loss_preserve_structure";
+            }
+
+            if (context.IsDealerSide)
+                score -= trumpCount * 1.5;
+
+            return new CandidateEvaluation
+            {
+                Cards = CloneCards(candidate),
+                Score = score,
+                Reason = reason
+            };
+        }
+
+        private int EstimateStructureLoss(List<Card> hand, List<Card> candidate, CardComparer comparer)
+        {
+            var before = EstimateStructureValue(hand, comparer);
+            var after = EstimateStructureValue(RemoveCards(hand, candidate), comparer);
+            return System.Math.Max(0, before - after);
+        }
+
+        private static double NormalizeWinMargin(int winMargin)
+        {
+            if (winMargin <= 0)
+                return 0;
+
+            return System.Math.Min(40.0, winMargin / 20.0);
+        }
+
+        private int EstimateStructureValue(List<Card> cards, CardComparer comparer)
+        {
+            if (cards == null || cards.Count == 0)
+                return 0;
+
+            int pairValue = CountPairs(cards) * 8;
+            int tractorValue = CountTractorPairUnits(cards, comparer) * 12;
+            return pairValue + tractorValue;
+        }
+
+        private int CountTractorPairUnits(List<Card> cards, CardComparer comparer)
+        {
+            int total = 0;
+            foreach (var group in BuildSystemGroups(cards))
+            {
+                var pairReps = group
+                    .GroupBy(card => card)
+                    .Where(g => g.Count() >= 2)
+                    .Select(g => g.Key)
+                    .OrderByDescending(card => card, comparer)
+                    .ToList();
+
+                if (pairReps.Count < 2)
+                    continue;
+
+                int index = 0;
+                while (index < pairReps.Count - 1)
+                {
+                    int run = 1;
+                    while (index + run < pairReps.Count &&
+                        IsConsecutivePairForTractor(pairReps[index + run - 1], pairReps[index + run]))
+                    {
+                        run++;
+                    }
+
+                    if (run >= 2)
+                        total += run;
+
+                    index += run;
+                }
+            }
+
+            return total;
+        }
+
+        private IEnumerable<List<Card>> BuildSystemGroups(List<Card> cards)
+        {
+            var groups = new List<List<Card>>();
+
+            var trumpCards = cards.Where(_config.IsTrump).ToList();
+            if (trumpCards.Count > 0)
+                groups.Add(trumpCards);
+
+            groups.AddRange(cards
+                .Where(card => !_config.IsTrump(card))
+                .GroupBy(card => card.Suit)
+                .Select(group => group.ToList()));
+
+            return groups;
+        }
+
+        private bool IsConsecutivePairForTractor(Card higher, Card lower)
+        {
+            var cards = new List<Card> { higher, higher, lower, lower };
+            return new CardPattern(cards, _config).IsTractor(cards);
+        }
+
+        private int EstimateSingleCardDiscardCost(List<Card> source, Card card, CardComparer comparer)
+        {
+            var remaining = RemoveCards(source, new List<Card> { card });
+            int structureLoss = EstimateStructureValue(source, comparer) - EstimateStructureValue(remaining, comparer);
+            int pointCost = GetCardPoints(card) * 4;
+            int trumpCost = _config.IsTrump(card) ? 12 : 0;
+            int valueCost = GetCardValue(card) / 40;
+            return structureLoss * 10 + pointCost + trumpCost + valueCost;
+        }
+
+        private List<Card> AppendFiller(List<Card> mustFollow, List<Card> orderedFiller, int missing)
+        {
+            var result = new List<Card>(mustFollow);
+            result.AddRange(orderedFiller.Take(missing));
+            return result;
+        }
+
+        private DecisionOutcome BuildPassthroughOutcome(DecisionOutcome source, string selectedReason)
+        {
+            return CreateScoredOutcome(
+                source.Phase,
+                CloneCards(source.SelectedCards),
+                CloneCandidateSets(source.Candidates),
+                source.PrimaryIntent,
+                selectedReason,
+                "rule_ai_v21_m1_passthrough",
+                source.CandidateScores,
+                source.CandidateReasonCodes,
+                source.CandidateFeatures,
+                source.Explanation,
+                source.Tags.Concat(new[] { "rule_ai_v21_m1", "passthrough" }).Distinct().ToArray());
+        }
+
+        private DecisionOutcome CreateOutcome(
+            PhaseKind phase,
+            List<Card> selectedCards,
+            List<List<Card>> candidates,
+            string primaryIntent,
+            string selectedReason,
+            params string[] tags)
+        {
+            return new DecisionOutcome
+            {
+                Phase = phase,
+                SelectedCards = CloneCards(selectedCards),
+                Candidates = CloneCandidateSets(candidates),
+                PrimaryIntent = primaryIntent,
+                SelectedReason = selectedReason,
+                Path = "legacy",
+                CandidateScores = new List<double>(),
+                CandidateReasonCodes = new List<string?>(),
+                CandidateFeatures = new List<Dictionary<string, double>>(),
+                Tags = tags.Where(tag => !string.IsNullOrWhiteSpace(tag)).Distinct().ToList()
+            };
+        }
+
+        private DecisionOutcome CreateScoredOutcome(
+            PhaseKind phase,
+            List<Card> selectedCards,
+            List<List<Card>> candidates,
+            string primaryIntent,
+            string selectedReason,
+            string path,
+            IEnumerable<double>? candidateScores,
+            IEnumerable<string?>? candidateReasonCodes = null,
+            IEnumerable<Dictionary<string, double>>? candidateFeatures = null,
+            DecisionExplanation? explanation = null,
+            params string[] tags)
+        {
+            return new DecisionOutcome
+            {
+                Phase = phase,
+                SelectedCards = CloneCards(selectedCards),
+                Candidates = CloneCandidateSets(candidates),
+                PrimaryIntent = primaryIntent,
+                SelectedReason = selectedReason,
+                Path = path,
+                CandidateScores = candidateScores?.ToList() ?? new List<double>(),
+                CandidateReasonCodes = candidateReasonCodes?.ToList() ?? new List<string?>(),
+                CandidateFeatures = candidateFeatures?.Select(features => new Dictionary<string, double>(features)).ToList()
+                    ?? new List<Dictionary<string, double>>(),
+                Tags = tags.Where(tag => !string.IsNullOrWhiteSpace(tag)).Distinct().ToList(),
+                Explanation = explanation
+            };
+        }
+
+        private DecisionOutcome CreatePolicyOutcome(
+            string path,
+            PhaseDecision decision,
+            params string[] tags)
+        {
+            return new DecisionOutcome
+            {
+                Phase = decision.Phase,
+                SelectedCards = CloneCards(decision.SelectedCards),
+                Candidates = decision.ScoredActions.Select(action => CloneCards(action.Cards)).ToList(),
+                PrimaryIntent = decision.Intent.PrimaryIntent.ToString(),
+                SelectedReason = decision.SelectedReason,
+                Path = path,
+                CandidateScores = decision.ScoredActions.Select(action => action.Score).ToList(),
+                CandidateReasonCodes = decision.ScoredActions.Select(action => string.IsNullOrWhiteSpace(action.ReasonCode) ? null : action.ReasonCode).ToList(),
+                CandidateFeatures = decision.ScoredActions.Select(action => new Dictionary<string, double>(action.Features)).ToList(),
+                Tags = tags.Where(tag => !string.IsNullOrWhiteSpace(tag)).Distinct().ToList(),
+                Explanation = decision.Explanation
+            };
+        }
+
+        private DecisionExplanation BuildDecisionExplanation(RuleAIContext context, DecisionOutcome outcome)
+        {
+            if (outcome.Explanation != null)
+                return outcome.Explanation;
+
+            var orderedCandidates = OrderCandidatesForLogging(context, outcome);
+            var useStoredScores = outcome.CandidateScores.Count == orderedCandidates.Count && orderedCandidates.Count > 0;
+            var topCandidates = orderedCandidates
+                .Take(3)
+                .Select(BuildReadableCandidateKey)
+                .ToList();
+            var topScores = useStoredScores
+                ? outcome.CandidateScores.Take(3).ToList()
+                : orderedCandidates
+                    .Take(3)
+                    .Select((_, index) => (double)(orderedCandidates.Count - index))
+                    .ToList();
+
+            var effectiveCandidates = orderedCandidates.Count > 0
+                ? orderedCandidates
+                : new List<List<Card>> { CloneCards(outcome.SelectedCards) };
+
+            return new DecisionExplanation
+            {
+                Phase = outcome.Phase,
+                PrimaryIntent = outcome.PrimaryIntent,
+                SelectedReason = outcome.SelectedReason,
+                CandidateCount = effectiveCandidates.Count,
+                TopCandidates = topCandidates,
+                TopScores = topScores,
+                SelectedAction = outcome.SelectedCards.Select(card => card.ToString()).ToList(),
+                Tags = new List<string>(outcome.Tags)
+            };
+        }
+
+        private List<List<Card>> OrderCandidatesForLogging(RuleAIContext context, DecisionOutcome outcome)
+        {
+            var candidates = outcome.Candidates.Count > 0
+                ? CloneCandidateSets(outcome.Candidates)
+                : new List<List<Card>> { CloneCards(outcome.SelectedCards) };
+
+            if (candidates.Count <= 1)
+                return candidates;
+
+            if (outcome.CandidateScores.Count == candidates.Count && outcome.CandidateScores.Count > 0)
+                return candidates;
+
+            var comparer = new CardComparer(_config);
+            if (outcome.Phase == PhaseKind.Lead)
+            {
+                candidates.Sort((left, right) => CompareLeadCandidates(right, left, comparer, context.Role));
+            }
+            else if (outcome.Phase == PhaseKind.Follow)
+            {
+                candidates.Sort((left, right) => CompareFollowCandidates(
+                    right,
+                    left,
+                    context.CurrentWinningCards.Count > 0 ? context.CurrentWinningCards : context.LeadCards,
+                    comparer,
+                    context.Role,
+                    context.PartnerWinning));
+            }
+
+            return candidates;
+        }
+
+        private void LogAiDecision(
+            RuleAIContext context,
+            DecisionOutcome outcome,
+            string path,
+            double totalMs,
+            double contextMs,
+            double legacyMs,
+            double shadowMs,
+            AIDecisionLogContext? logContext,
+            string decisionTraceId)
+        {
+            var explanation = BuildDecisionExplanation(context, outcome);
+            var entry = CreateAiLogEntry("ai.decision", LogCategories.Decision, context, logContext, decisionTraceId);
+
+            entry.Payload = new Dictionary<string, object?>
+            {
+                ["decision_trace_id"] = decisionTraceId,
+                ["phase"] = context.Phase.ToString(),
+                ["path"] = path,
+                ["phase_policy"] = explanation.PhasePolicy,
+                ["difficulty"] = _difficulty.ToString(),
+                ["player_index"] = ResolvePlayerIndex(context, logContext),
+                ["role"] = context.Role.ToString(),
+                ["partner_winning"] = context.PartnerWinning,
+                ["primary_intent"] = explanation.PrimaryIntent,
+                ["secondary_intent"] = explanation.SecondaryIntent,
+                ["selected_reason"] = explanation.SelectedReason,
+                ["candidate_count"] = explanation.CandidateCount,
+                ["selected_cards"] = BuildCardPayload(outcome.SelectedCards),
+                ["top_candidates"] = explanation.TopCandidates,
+                ["top_scores"] = explanation.TopScores,
+                ["hard_rule_rejects"] = explanation.HardRuleRejects,
+                ["risk_flags"] = explanation.RiskFlags,
+                ["selected_action_features"] = explanation.SelectedActionFeatures,
+                ["tags"] = explanation.Tags,
+                ["hand_count"] = context.HandCount,
+                ["trump_count"] = context.TrumpCount,
+                ["point_card_count"] = context.PointCardCount,
+                ["trick_score"] = context.TrickScore,
+                ["cards_left_min"] = context.CardsLeftMin
+            };
+            entry.Metrics = new Dictionary<string, double>
+            {
+                ["total_ms"] = totalMs,
+                ["context_ms"] = contextMs,
+                ["legacy_ms"] = legacyMs,
+                ["shadow_ms"] = shadowMs,
+                ["selected_score"] = ResolveSelectedScore(outcome)
+            };
+
+            _decisionLogger.Log(entry);
+        }
+
+        private void LogAiCompare(
+            RuleAIContext context,
+            DecisionCompareSnapshot compareSnapshot,
+            AIDecisionLogContext? logContext,
+            string decisionTraceId)
+        {
+            var entry = CreateAiLogEntry("ai.compare", LogCategories.Diag, context, logContext, decisionTraceId);
+
+            entry.Payload = new Dictionary<string, object?>
+            {
+                ["decision_trace_id"] = decisionTraceId,
+                ["phase"] = context.Phase.ToString(),
+                ["player_index"] = ResolvePlayerIndex(context, logContext),
+                ["role"] = context.Role.ToString(),
+                ["partner_winning"] = context.PartnerWinning,
+                ["divergence"] = compareSnapshot.Divergence,
+                ["old_path"] = compareSnapshot.OldPath,
+                ["new_path"] = compareSnapshot.NewPath,
+                ["old_action"] = BuildCardPayload(compareSnapshot.OldAction),
+                ["new_action"] = BuildCardPayload(compareSnapshot.NewAction),
+                ["old_reason"] = compareSnapshot.OldReason,
+                ["new_reason"] = compareSnapshot.NewReason,
+                ["old_intent"] = compareSnapshot.OldIntent,
+                ["new_intent"] = compareSnapshot.NewIntent
+            };
+            entry.Metrics = new Dictionary<string, double>
+            {
+                ["old_candidate_count"] = compareSnapshot.OldCandidateCount,
+                ["new_candidate_count"] = compareSnapshot.NewCandidateCount
+            };
+
+            _decisionLogger.Log(entry);
+        }
+
+        private void LogAiPerf(
+            RuleAIContext context,
+            DecisionOutcome outcome,
+            string path,
+            double totalMs,
+            double contextMs,
+            double legacyMs,
+            double shadowMs,
+            bool shadowCompared,
+            AIDecisionLogContext? logContext,
+            string decisionTraceId)
+        {
+            var entry = CreateAiLogEntry("ai.perf", LogCategories.Perf, context, logContext, decisionTraceId);
+
+            entry.Payload = new Dictionary<string, object?>
+            {
+                ["decision_trace_id"] = decisionTraceId,
+                ["phase"] = context.Phase.ToString(),
+                ["path"] = path,
+                ["player_index"] = ResolvePlayerIndex(context, logContext),
+                ["candidate_count"] = outcome.Candidates.Count,
+                ["selected_count"] = outcome.SelectedCards.Count,
+                ["shadow_compared"] = shadowCompared
+            };
+            entry.Metrics = new Dictionary<string, double>
+            {
+                ["total_ms"] = totalMs,
+                ["context_ms"] = contextMs,
+                ["legacy_ms"] = legacyMs,
+                ["shadow_ms"] = shadowMs
+            };
+
+            _decisionLogger.Log(entry);
+        }
+
+        private void LogAiBundle(
+            RuleAIContext context,
+            DecisionOutcome outcome,
+            string path,
+            double totalMs,
+            double contextMs,
+            double legacyMs,
+            double shadowMs,
+            AIDecisionLogContext? logContext,
+            string decisionTraceId,
+            DecisionCompareSnapshot compareSnapshot)
+        {
+            if (!_ruleAIOptions.DecisionTraceEnabled)
+                return;
+
+            var explanation = BuildDecisionExplanation(context, outcome);
+            var selectedMetadata = ResolveSelectedCandidateMetadata(context, outcome, explanation);
+            var candidateDetails = BuildCandidateDetails(context, outcome);
+            var entry = CreateAiLogEntry("ai.bundle", LogCategories.Diag, context, logContext, decisionTraceId);
+
+            entry.Payload = new Dictionary<string, object?>
+            {
+                ["decision_trace_id"] = decisionTraceId,
+                ["bundle_version"] = DecisionBundleVersion,
+                ["phase"] = context.Phase.ToString(),
+                ["path"] = path,
+                ["player_index"] = ResolvePlayerIndex(context, logContext),
+                ["bundle"] = new Dictionary<string, object?>
+                {
+                    ["meta"] = BuildBundleMeta(context, path, logContext, decisionTraceId),
+                    ["context_snapshot"] = BuildContextSnapshot(context, logContext),
+                    ["intent_snapshot"] = BuildIntentSnapshot(explanation),
+                    ["candidate_details"] = candidateDetails,
+                    ["selected_action"] = new Dictionary<string, object?>
+                    {
+                        ["cards"] = BuildCardPayload(outcome.SelectedCards),
+                        ["score"] = selectedMetadata.Score,
+                        ["reason_code"] = selectedMetadata.ReasonCode ?? explanation.SelectedReason,
+                        ["features"] = selectedMetadata.Features
+                    },
+                    ["compare_snapshot"] = BuildCompareSnapshotPayload(compareSnapshot),
+                    ["perf_snapshot"] = BuildPerfSnapshotPayload(outcome, totalMs, contextMs, legacyMs, shadowMs),
+                    ["truth_snapshot"] = BuildTruthSnapshot(logContext),
+                    ["algorithm_trace"] = BuildAlgorithmTrace(context, explanation, path, compareSnapshot, candidateDetails.Count)
+                }
+            };
+            entry.Metrics = new Dictionary<string, double>
+            {
+                ["candidate_count"] = candidateDetails.Count,
+                ["selected_score"] = selectedMetadata.Score ?? 0
+            };
+
+            _decisionLogger.Log(entry);
+        }
+
+        private LogEntry CreateAiLogEntry(
+            string eventName,
+            string category,
+            RuleAIContext context,
+            AIDecisionLogContext? logContext,
+            string decisionTraceId)
+        {
+            return new LogEntry
+            {
+                SchemaVersion = "1.3",
+                Event = eventName,
+                Category = category,
+                Level = LogLevels.Info,
+                SessionId = logContext?.SessionId,
+                GameId = logContext?.GameId,
+                RoundId = logContext?.RoundId,
+                TrickId = ResolveTrickId(context, logContext),
+                TurnId = ResolveTurnId(context, logContext),
+                Phase = context.Phase.ToString(),
+                Actor = ResolveLogActor(logContext),
+                CorrelationId = decisionTraceId
+            };
+        }
+
+        private static string ResolveLogActor(AIDecisionLogContext? logContext)
+        {
+            if (!string.IsNullOrWhiteSpace(logContext?.Actor))
+                return logContext.Actor!;
+
+            if (logContext?.PlayerIndex != null)
+                return $"player_{logContext.PlayerIndex.Value}";
+
+            return "rule_ai";
+        }
+
+        private string ResolveDecisionTraceId(RuleAIContext context, AIDecisionLogContext? logContext)
+        {
+            if (!string.IsNullOrWhiteSpace(logContext?.DecisionTraceId))
+                return logContext.DecisionTraceId!;
+
+            var phaseToken = context.Phase.ToString().ToLowerInvariant();
+            var playerToken = ResolvePlayerIndex(context, logContext);
+            var trickToken = ResolveTrickId(context, logContext) ?? "no_trick";
+            var turnToken = ResolveTurnId(context, logContext) ?? "no_turn";
+            var uniqueSuffix = Guid.NewGuid().ToString("N").Substring(0, 8);
+            return $"{phaseToken}_p{playerToken}_{trickToken}_{turnToken}_{uniqueSuffix}";
+        }
+
+        private DecisionCompareSnapshot BuildCompareSnapshot(
+            DecisionOutcome legacyOutcome,
+            DecisionOutcome? newOutcome,
+            bool shadowCompared)
+        {
+            if (!shadowCompared || newOutcome == null)
+            {
+                return new DecisionCompareSnapshot
+                {
+                    ShadowCompared = false,
+                    OldCandidateCount = legacyOutcome.Candidates.Count,
+                    NewCandidateCount = newOutcome?.Candidates.Count ?? 0
+                };
+            }
+
+            return new DecisionCompareSnapshot
+            {
+                ShadowCompared = true,
+                Divergence = !string.Equals(
+                    BuildCandidateKey(legacyOutcome.SelectedCards),
+                    BuildCandidateKey(newOutcome.SelectedCards),
+                    StringComparison.Ordinal),
+                OldPath = legacyOutcome.Path,
+                NewPath = newOutcome.Path,
+                OldAction = CloneCards(legacyOutcome.SelectedCards),
+                NewAction = CloneCards(newOutcome.SelectedCards),
+                OldReason = legacyOutcome.SelectedReason,
+                NewReason = newOutcome.SelectedReason,
+                OldIntent = legacyOutcome.PrimaryIntent,
+                NewIntent = newOutcome.PrimaryIntent,
+                OldCandidateCount = legacyOutcome.Candidates.Count,
+                NewCandidateCount = newOutcome.Candidates.Count
+            };
+        }
+
+        private Dictionary<string, object?> BuildBundleMeta(
+            RuleAIContext context,
+            string path,
+            AIDecisionLogContext? logContext,
+            string decisionTraceId)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["decision_trace_id"] = decisionTraceId,
+                ["phase"] = context.Phase.ToString(),
+                ["path"] = path,
+                ["difficulty"] = _difficulty.ToString(),
+                ["player_index"] = ResolvePlayerIndex(context, logContext),
+                ["role"] = context.Role.ToString(),
+                ["session_id"] = logContext?.SessionId,
+                ["game_id"] = logContext?.GameId,
+                ["round_id"] = logContext?.RoundId,
+                ["trick_id"] = ResolveTrickId(context, logContext),
+                ["turn_id"] = ResolveTurnId(context, logContext)
+            };
+        }
+
+        private Dictionary<string, object?> BuildContextSnapshot(
+            RuleAIContext context,
+            AIDecisionLogContext? logContext)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["trick_index"] = logContext?.TrickIndex ?? context.DecisionFrame.TrickIndex,
+                ["turn_index"] = logContext?.TurnIndex ?? context.DecisionFrame.TurnIndex,
+                ["play_position"] = logContext?.PlayPosition ?? context.DecisionFrame.PlayPosition,
+                ["dealer_index"] = logContext?.DealerIndex ?? context.DealerIndex,
+                ["current_winning_player"] = logContext?.CurrentWinningPlayer ?? context.DecisionFrame.CurrentWinningPlayer,
+                ["partner_winning"] = context.PartnerWinning,
+                ["trick_score"] = context.TrickScore,
+                ["cards_left_min"] = context.CardsLeftMin,
+                ["my_hand"] = BuildCardPayload(context.MyHand),
+                ["lead_cards"] = BuildCardPayload(context.LeadCards),
+                ["current_winning_cards"] = BuildCardPayload(context.CurrentWinningCards),
+                ["visible_bottom_cards"] = BuildCardPayload(context.VisibleBottomCards),
+                ["game_config"] = new Dictionary<string, object?>
+                {
+                    ["trump_suit"] = _config.TrumpSuit?.ToString(),
+                    ["level_rank"] = _config.LevelRank.ToString(),
+                    ["throw_fail_penalty"] = _config.ThrowFailPenalty,
+                    ["enable_counter_bottom"] = _config.EnableCounterBottom,
+                    ["strict_follow_structure"] = context.RuleProfile.StrictFollowStructure,
+                    ["strict_cut_structure"] = context.RuleProfile.StrictCutStructure
+                },
+                ["hand_profile"] = ToStructuredElement(context.HandProfile),
+                ["memory_snapshot"] = ToStructuredElement(context.MemorySnapshot),
+                ["inference_snapshot"] = ToStructuredElement(context.InferenceSnapshot),
+                ["decision_frame"] = ToStructuredElement(context.DecisionFrame)
+            };
+        }
+
+        private static Dictionary<string, object?> BuildIntentSnapshot(DecisionExplanation explanation)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["primary_intent"] = explanation.PrimaryIntent,
+                ["secondary_intent"] = explanation.SecondaryIntent,
+                ["selected_reason"] = explanation.SelectedReason,
+                ["phase_policy"] = explanation.PhasePolicy,
+                ["hard_rule_rejects"] = explanation.HardRuleRejects,
+                ["risk_flags"] = explanation.RiskFlags,
+                ["tags"] = explanation.Tags
+            };
+        }
+
+        private List<Dictionary<string, object?>> BuildCandidateDetails(RuleAIContext context, DecisionOutcome outcome)
+        {
+            var orderedCandidates = OrderCandidatesForLogging(context, outcome);
+            if (orderedCandidates.Count == 0 && outcome.SelectedCards.Count > 0)
+                orderedCandidates.Add(CloneCards(outcome.SelectedCards));
+
+            var selectedKey = BuildCandidateKey(outcome.SelectedCards);
+            if (!string.IsNullOrWhiteSpace(selectedKey) &&
+                orderedCandidates.All(candidate => !string.Equals(BuildCandidateKey(candidate), selectedKey, StringComparison.Ordinal)))
+            {
+                orderedCandidates.Insert(0, CloneCards(outcome.SelectedCards));
+            }
+
+            orderedCandidates = LimitCandidatesForTrace(orderedCandidates, selectedKey);
+            var metadataByKey = BuildCandidateMetadataLookup(outcome);
+            var details = new List<Dictionary<string, object?>>(orderedCandidates.Count);
+
+            for (int index = 0; index < orderedCandidates.Count; index++)
+            {
+                var candidate = orderedCandidates[index];
+                var candidateKey = BuildCandidateKey(candidate);
+                metadataByKey.TryGetValue(candidateKey, out var metadata);
+
+                details.Add(new Dictionary<string, object?>
+                {
+                    ["candidate_index"] = index,
+                    ["cards"] = BuildCardPayload(candidate),
+                    ["score"] = metadata?.Score,
+                    ["reason_code"] = metadata?.ReasonCode,
+                    ["features"] = metadata?.Features ?? new Dictionary<string, double>(),
+                    ["is_selected"] = string.Equals(candidateKey, selectedKey, StringComparison.Ordinal)
+                });
+            }
+
+            return details;
+        }
+
+        private Dictionary<string, CandidateMetadata> BuildCandidateMetadataLookup(DecisionOutcome outcome)
+        {
+            var lookup = new Dictionary<string, CandidateMetadata>(StringComparer.Ordinal);
+            var candidates = outcome.Candidates.Count > 0
+                ? outcome.Candidates
+                : (outcome.SelectedCards.Count > 0
+                    ? new List<List<Card>> { CloneCards(outcome.SelectedCards) }
+                    : new List<List<Card>>());
+
+            for (int index = 0; index < candidates.Count; index++)
+            {
+                var key = BuildCandidateKey(candidates[index]);
+                if (string.IsNullOrWhiteSpace(key) || lookup.ContainsKey(key))
+                    continue;
+
+                lookup[key] = new CandidateMetadata
+                {
+                    Score = index < outcome.CandidateScores.Count ? outcome.CandidateScores[index] : null,
+                    ReasonCode = index < outcome.CandidateReasonCodes.Count ? outcome.CandidateReasonCodes[index] : null,
+                    Features = index < outcome.CandidateFeatures.Count
+                        ? new Dictionary<string, double>(outcome.CandidateFeatures[index])
+                        : new Dictionary<string, double>()
+                };
+            }
+
+            return lookup;
+        }
+
+        private CandidateMetadata ResolveSelectedCandidateMetadata(
+            RuleAIContext context,
+            DecisionOutcome outcome,
+            DecisionExplanation explanation)
+        {
+            var selectedKey = BuildCandidateKey(outcome.SelectedCards);
+            var lookup = BuildCandidateMetadataLookup(outcome);
+            if (!string.IsNullOrWhiteSpace(selectedKey) && lookup.TryGetValue(selectedKey, out var metadata))
+            {
+                return new CandidateMetadata
+                {
+                    Score = metadata.Score,
+                    ReasonCode = string.IsNullOrWhiteSpace(metadata.ReasonCode) ? outcome.SelectedReason : metadata.ReasonCode,
+                    Features = metadata.Features.Count > 0
+                        ? new Dictionary<string, double>(metadata.Features)
+                        : new Dictionary<string, double>(explanation.SelectedActionFeatures)
+                };
+            }
+
+            return new CandidateMetadata
+            {
+                Score = outcome.CandidateScores.Count > 0 ? outcome.CandidateScores[0] : null,
+                ReasonCode = outcome.SelectedReason,
+                Features = new Dictionary<string, double>(explanation.SelectedActionFeatures)
+            };
+        }
+
+        private List<List<Card>> LimitCandidatesForTrace(List<List<Card>> candidates, string selectedKey)
+        {
+            if (_ruleAIOptions.DecisionTraceMaxCandidates <= 0 || candidates.Count <= _ruleAIOptions.DecisionTraceMaxCandidates)
+                return candidates.Select(CloneCards).ToList();
+
+            var limited = candidates
+                .Take(_ruleAIOptions.DecisionTraceMaxCandidates)
+                .Select(CloneCards)
+                .ToList();
+
+            if (!string.IsNullOrWhiteSpace(selectedKey) &&
+                limited.All(candidate => !string.Equals(BuildCandidateKey(candidate), selectedKey, StringComparison.Ordinal)))
+            {
+                var selected = candidates.FirstOrDefault(candidate => string.Equals(BuildCandidateKey(candidate), selectedKey, StringComparison.Ordinal));
+                if (selected != null)
+                {
+                    limited[limited.Count - 1] = CloneCards(selected);
+                    limited = DeduplicateCandidates(limited);
+                }
+            }
+
+            return limited;
+        }
+
+        private static Dictionary<string, object?> BuildCompareSnapshotPayload(DecisionCompareSnapshot compareSnapshot)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["shadow_compared"] = compareSnapshot.ShadowCompared,
+                ["divergence"] = compareSnapshot.Divergence,
+                ["old_path"] = compareSnapshot.OldPath,
+                ["new_path"] = compareSnapshot.NewPath,
+                ["old_action"] = BuildCardPayload(compareSnapshot.OldAction),
+                ["new_action"] = BuildCardPayload(compareSnapshot.NewAction),
+                ["old_reason"] = compareSnapshot.OldReason,
+                ["new_reason"] = compareSnapshot.NewReason,
+                ["old_intent"] = compareSnapshot.OldIntent,
+                ["new_intent"] = compareSnapshot.NewIntent
+            };
+        }
+
+        private Dictionary<string, object?> BuildPerfSnapshotPayload(
+            DecisionOutcome outcome,
+            double totalMs,
+            double contextMs,
+            double legacyMs,
+            double shadowMs)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["total_ms"] = totalMs,
+                ["context_ms"] = contextMs,
+                ["legacy_ms"] = legacyMs,
+                ["shadow_ms"] = shadowMs,
+                ["candidate_count"] = outcome.Candidates.Count,
+                ["selected_score"] = ResolveSelectedScore(outcome)
+            };
+        }
+
+        private Dictionary<string, object?> BuildTruthSnapshot(AIDecisionLogContext? logContext)
+        {
+            if (!_ruleAIOptions.DecisionTraceIncludeTruthSnapshot || logContext?.TruthSnapshot == null)
+            {
+                return new Dictionary<string, object?>
+                {
+                    ["enabled"] = false
+                };
+            }
+
+            var truthSnapshot = new Dictionary<string, object?>
+            {
+                ["enabled"] = true
+            };
+
+            foreach (var entry in logContext.TruthSnapshot)
+                truthSnapshot[entry.Key] = entry.Value;
+
+            return truthSnapshot;
+        }
+
+        private Dictionary<string, object?> BuildAlgorithmTrace(
+            RuleAIContext context,
+            DecisionExplanation explanation,
+            string path,
+            DecisionCompareSnapshot compareSnapshot,
+            int candidateCount)
+        {
+            return new Dictionary<string, object?>
+            {
+                ["policy_module"] = string.IsNullOrWhiteSpace(explanation.PhasePolicy) ? path : explanation.PhasePolicy,
+                ["path"] = path,
+                ["phase"] = context.Phase.ToString(),
+                ["use_rule_ai_v21"] = _ruleAIOptions.UseRuleAIV21,
+                ["shadow_compare_enabled"] = _ruleAIOptions.EnableShadowCompare,
+                ["shadow_compared"] = compareSnapshot.ShadowCompared,
+                ["shadow_sample_rate"] = _ruleAIOptions.ShadowSampleRate,
+                ["decision_trace_enabled"] = _ruleAIOptions.DecisionTraceEnabled,
+                ["decision_trace_include_truth_snapshot"] = _ruleAIOptions.DecisionTraceIncludeTruthSnapshot,
+                ["decision_trace_max_candidates"] = _ruleAIOptions.DecisionTraceMaxCandidates,
+                ["candidate_count"] = candidateCount
+            };
+        }
+
+        private double ResolveSelectedScore(DecisionOutcome outcome)
+        {
+            var selectedKey = BuildCandidateKey(outcome.SelectedCards);
+            if (!string.IsNullOrWhiteSpace(selectedKey))
+            {
+                var lookup = BuildCandidateMetadataLookup(outcome);
+                if (lookup.TryGetValue(selectedKey, out var metadata) && metadata.Score.HasValue)
+                    return metadata.Score.Value;
+            }
+
+            return outcome.CandidateScores.Count > 0 ? outcome.CandidateScores[0] : 0;
+        }
+
+        private static int ResolvePlayerIndex(RuleAIContext context, AIDecisionLogContext? logContext)
+        {
+            if (logContext?.PlayerIndex != null)
+                return logContext.PlayerIndex.Value;
+
+            return context.PlayerIndex;
+        }
+
+        private static string? ResolveTrickId(RuleAIContext context, AIDecisionLogContext? logContext)
+        {
+            if (!string.IsNullOrWhiteSpace(logContext?.TrickId))
+                return logContext.TrickId;
+
+            return context.DecisionFrame.TrickIndex > 0
+                ? $"trick_{context.DecisionFrame.TrickIndex:D4}"
+                : null;
+        }
+
+        private static string? ResolveTurnId(RuleAIContext context, AIDecisionLogContext? logContext)
+        {
+            if (!string.IsNullOrWhiteSpace(logContext?.TurnId))
+                return logContext.TurnId;
+
+            return context.DecisionFrame.TurnIndex > 0
+                ? $"turn_{context.DecisionFrame.TurnIndex:D4}"
+                : null;
+        }
+
+        private static JsonSerializerOptions CreateStructuredPayloadJsonOptions()
+        {
+            var options = new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = SnakeCaseJsonNamingPolicy.Instance
+            };
+            options.Converters.Add(new JsonStringEnumConverter());
+            return options;
+        }
+
+        private static JsonElement ToStructuredElement<T>(T value)
+        {
+            return JsonSerializer.SerializeToElement(value, StructuredPayloadJsonOptions);
+        }
+
+        private bool ShouldRunShadowCompare()
+        {
+            if (!_ruleAIOptions.EnableShadowCompare)
+                return false;
+
+            if (_ruleAIOptions.ShadowSampleRate >= 1)
+                return true;
+
+            if (_ruleAIOptions.ShadowSampleRate <= 0)
+                return false;
+
+            return _telemetryRandom.NextDouble() < _ruleAIOptions.ShadowSampleRate;
+        }
+
+        private string DetermineLeadIntent(List<Card> selectedCards)
+        {
+            if (selectedCards == null || selectedCards.Count == 0)
+                return "TakeLead";
+
+            return selectedCards.Count > 1 ? "PrepareThrow" : "TakeLead";
+        }
+
+        private string DetermineLeadReason(List<Card> selectedCards)
+        {
+            if (selectedCards == null || selectedCards.Count == 0)
+                return "lead_noop";
+
+            var pattern = new CardPattern(selectedCards, _config);
+            return pattern.Type switch
+            {
+                PatternType.Tractor => "lead_best_tractor",
+                PatternType.Pair => "lead_best_pair",
+                PatternType.Mixed => "lead_best_throw",
+                _ => "lead_best_single"
+            };
+        }
+
+        private string DetermineFollowIntent(bool partnerWinning, bool canBeatCurrentWinner)
+        {
+            if (partnerWinning)
+                return "PassToMate";
+
+            return canBeatCurrentWinner ? "TakeScore" : "MinimizeLoss";
+        }
+
+        private string DetermineFollowReason(bool partnerWinning, bool canBeatCurrentWinner)
+        {
+            if (partnerWinning)
+                return "follow_support_partner";
+
+            return canBeatCurrentWinner ? "follow_contest_trick" : "follow_minimize_loss";
+        }
+
+        private static List<Card> CloneCards(List<Card>? cards)
+        {
+            return cards == null ? new List<Card>() : new List<Card>(cards);
+        }
+
+        private static List<List<Card>> CloneCandidateSets(List<List<Card>>? candidates)
+        {
+            if (candidates == null)
+                return new List<List<Card>>();
+
+            return candidates.Select(CloneCards).ToList();
+        }
+
+        private static List<Dictionary<string, object?>> BuildCardPayload(List<Card> cards)
+        {
+            return cards.Select(card => new Dictionary<string, object?>
+            {
+                ["suit"] = card.Suit.ToString(),
+                ["rank"] = card.Rank.ToString(),
+                ["score"] = card.Score,
+                ["text"] = card.ToString()
+            }).ToList();
+        }
+
+        private static string BuildReadableCandidateKey(List<Card> cards)
+        {
+            return cards == null || cards.Count == 0
+                ? string.Empty
+                : string.Join(" ", cards.Select(card => card.ToString()));
         }
 
         /// <summary>
@@ -279,7 +1799,19 @@ namespace TractorGame.Core.AI
 
             // 优先同花色
             if (sameCategoryCards.Count >= need)
+            {
+                var structuredCandidate = FindLegalSameCategoryFollowCandidate(
+                    hand,
+                    leadCards,
+                    sameCategoryCards,
+                    need,
+                    comparer,
+                    validator);
+                if (structuredCandidate != null)
+                    return structuredCandidate;
+
                 return sameCategoryCards.OrderBy(c => c, comparer).Take(need).ToList();
+            }
 
             // 同花色不足，先出同花色，再补其他
             var result = new List<Card>(sameCategoryCards);
@@ -287,6 +1819,182 @@ namespace TractorGame.Core.AI
             result.AddRange(remaining.OrderBy(c => c, comparer).Take(need - result.Count));
 
             return result;
+        }
+
+        private List<Card>? FindExhaustiveLegalFollowCandidate(
+            List<Card> hand,
+            List<Card> leadCards,
+            int need,
+            CardComparer comparer,
+            FollowValidator validator)
+        {
+            if (hand.Count < need || need <= 0)
+                return null;
+
+            var leadCategory = _config.GetCardCategory(leadCards[0]);
+            var leadSuit = leadCards[0].Suit;
+            var sameCategoryCards = hand.Where(c => MatchesLeadCategory(c, leadSuit, leadCategory)).ToList();
+            if (sameCategoryCards.Count >= need)
+            {
+                var sameCategoryCandidate = FindLegalSameCategoryFollowCandidate(
+                    hand,
+                    leadCards,
+                    sameCategoryCards,
+                    need,
+                    comparer,
+                    validator);
+                if (sameCategoryCandidate != null)
+                    return sameCategoryCandidate;
+            }
+
+            var groupedSearch = FindLegalGroupedFollowCandidate(hand, leadCards, hand, need, comparer, validator);
+            if (groupedSearch != null)
+                return groupedSearch;
+
+            var ordered = hand
+                .OrderBy(card => EstimateSingleCardDiscardCost(hand, card, comparer))
+                .ThenBy(card => card, comparer)
+                .ToList();
+
+            foreach (var combo in Combinations(ordered, need))
+            {
+                if (validator.IsValidFollow(hand, leadCards, combo))
+                    return combo;
+            }
+
+            return null;
+        }
+
+        private DecisionOutcome EnsureLegalFollowOutcome(
+            DecisionOutcome outcome,
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card>? currentWinningCards,
+            AIRole role,
+            bool partnerWinning)
+        {
+            if (outcome.Phase != PhaseKind.Follow || hand.Count == 0 || leadCards.Count == 0)
+                return outcome;
+
+            var validator = new FollowValidator(_config);
+            if (outcome.SelectedCards.Count == leadCards.Count &&
+                validator.IsValidFollow(hand, leadCards, outcome.SelectedCards))
+            {
+                return outcome;
+            }
+
+            var comparer = new CardComparer(_config);
+            var legalized = FindExhaustiveLegalFollowCandidate(hand, leadCards, leadCards.Count, comparer, validator);
+            if (legalized == null)
+                return outcome;
+
+            var winningCards = currentWinningCards == null || currentWinningCards.Count == 0
+                ? leadCards
+                : currentWinningCards;
+
+            return CreateOutcome(
+                PhaseKind.Follow,
+                legalized,
+                new List<List<Card>> { legalized },
+                DetermineFollowIntent(partnerWinning, CanBeatCards(winningCards, legalized)),
+                "follow_legalized_after_invalid_selection",
+                $"{outcome.Path}_legalized",
+                "fallback",
+                "legalized");
+        }
+
+        private List<Card>? FindLegalSameCategoryFollowCandidate(
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card> sameCategoryCards,
+            int need,
+            CardComparer comparer,
+            FollowValidator validator)
+        {
+            return FindLegalGroupedFollowCandidate(hand, leadCards, sameCategoryCards, need, comparer, validator);
+        }
+
+        private List<Card>? FindLegalGroupedFollowCandidate(
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card> searchPool,
+            int need,
+            CardComparer comparer,
+            FollowValidator validator)
+        {
+            if (searchPool.Count < need || need <= 0)
+                return null;
+
+            var groups = searchPool
+                .GroupBy(card => card)
+                .Select(group => new FollowCardGroup(group.Key, group.Count()))
+                .OrderByDescending(group => group.Count)
+                .ThenBy(group => EstimateSingleCardDiscardCost(searchPool, group.Card, comparer))
+                .ThenBy(group => group.Card, comparer)
+                .ToList();
+
+            var remainingCounts = new int[groups.Count];
+            for (int i = groups.Count - 1; i >= 0; i--)
+            {
+                remainingCounts[i] = groups[i].Count + (i + 1 < groups.Count ? remainingCounts[i + 1] : 0);
+            }
+
+            var candidate = new List<Card>(need);
+            return SearchLegalGroupedFollowCandidate(
+                hand,
+                leadCards,
+                validator,
+                groups,
+                remainingCounts,
+                index: 0,
+                remainingToPick: need,
+                candidate);
+        }
+
+        private List<Card>? SearchLegalGroupedFollowCandidate(
+            List<Card> hand,
+            List<Card> leadCards,
+            FollowValidator validator,
+            List<FollowCardGroup> groups,
+            int[] remainingCounts,
+            int index,
+            int remainingToPick,
+            List<Card> candidate)
+        {
+            if (remainingToPick == 0)
+            {
+                return validator.IsValidFollow(hand, leadCards, candidate)
+                    ? new List<Card>(candidate)
+                    : null;
+            }
+
+            if (index >= groups.Count || remainingCounts[index] < remainingToPick)
+                return null;
+
+            var group = groups[index];
+            int maxTake = System.Math.Min(group.Count, remainingToPick);
+            for (int take = maxTake; take >= 0; take--)
+            {
+                for (int i = 0; i < take; i++)
+                    candidate.Add(group.Card);
+
+                var result = SearchLegalGroupedFollowCandidate(
+                    hand,
+                    leadCards,
+                    validator,
+                    groups,
+                    remainingCounts,
+                    index + 1,
+                    remainingToPick - take,
+                    candidate);
+                if (result != null)
+                    return result;
+
+                for (int i = 0; i < take; i++)
+                    candidate.RemoveAt(candidate.Count - 1);
+            }
+
+            return null;
         }
 
         /// <summary>
@@ -319,20 +2027,114 @@ namespace TractorGame.Core.AI
         /// 输入：手牌（推荐33张：25张手牌 + 8张底牌，但也支持其他数量）
         /// 输出：8张要扣底的牌
         /// </summary>
-        public List<Card> BuryBottom(List<Card> hand)
+        public List<Card> BuryBottom(
+            List<Card> hand,
+            AIRole role = AIRole.Dealer,
+            List<Card>? visibleBottomCards = null,
+            AIDecisionLogContext? logContext = null,
+            int defenderScore = 0,
+            int cardsLeftMin = -1)
         {
-            // [P2修复] 空参保护
+            var safeHand = hand ?? new List<Card>();
+            var totalStopwatch = Stopwatch.StartNew();
+
+            var contextStopwatch = Stopwatch.StartNew();
+            var context = _contextBuilder.BuildBuryContext(
+                safeHand,
+                role,
+                playerIndex: logContext?.PlayerIndex ?? -1,
+                dealerIndex: logContext?.DealerIndex ?? -1,
+                visibleBottomCards: visibleBottomCards,
+                defenderScore: defenderScore,
+                cardsLeftMin: cardsLeftMin);
+            contextStopwatch.Stop();
+
+            var legacyStopwatch = Stopwatch.StartNew();
+            var legacyOutcome = BuryBottomOldPath(safeHand);
+            legacyStopwatch.Stop();
+
+            var shadowStopwatch = Stopwatch.StartNew();
+            var shouldCompare = _ruleAIOptions.EnableShadowCompare && ShouldRunShadowCompare();
+            DecisionOutcome? newOutcome = null;
+            if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
+            {
+                var decision = _buryPolicy2.Decide(context);
+                newOutcome = decision.SelectedCards.Count == 8
+                    ? CreatePolicyOutcome("rule_ai_v21_bury_policy2", decision, "rule_ai_v21", "bury")
+                    : BuildPassthroughOutcome(legacyOutcome, "rule_ai_v21_bury_fallback_to_legacy");
+            }
+
+            var decisionTraceId = ResolveDecisionTraceId(context, logContext);
+            var compareSnapshot = BuildCompareSnapshot(legacyOutcome, newOutcome, shouldCompare);
+
+            if (compareSnapshot.ShadowCompared)
+                LogAiCompare(context, compareSnapshot, logContext, decisionTraceId);
+
+            shadowStopwatch.Stop();
+
+            var selectedOutcome = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
+                ? newOutcome
+                : legacyOutcome;
+            var selectedPath = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
+                ? newOutcome.Path
+                : legacyOutcome.Path;
+
+            totalStopwatch.Stop();
+
+            LogAiDecision(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                logContext,
+                decisionTraceId);
+
+            LogAiPerf(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                shouldCompare,
+                logContext,
+                decisionTraceId);
+
+            LogAiBundle(
+                context,
+                selectedOutcome,
+                selectedPath,
+                totalStopwatch.Elapsed.TotalMilliseconds,
+                contextStopwatch.Elapsed.TotalMilliseconds,
+                legacyStopwatch.Elapsed.TotalMilliseconds,
+                shadowStopwatch.Elapsed.TotalMilliseconds,
+                logContext,
+                decisionTraceId,
+                compareSnapshot);
+
+            return new List<Card>(selectedOutcome.SelectedCards);
+        }
+
+        private DecisionOutcome BuryBottomOldPath(List<Card> hand)
+        {
             if (hand == null || hand.Count < 8)
-                return new List<Card>();
+            {
+                return CreateOutcome(
+                    PhaseKind.BuryBottom,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    "ProtectBottom",
+                    "bury_empty_hand",
+                    "legacy");
+            }
 
             var comparer = new CardComparer(_config);
-
-            // [P1修复] 支持任意数量的手牌（兼容现有API测试）
-            // 如果手牌正好是33张，使用智能策略
-            // 如果手牌少于33张，简单取最小的8张
             if (hand.Count == 33)
             {
-                // 智能埋底策略
                 var cardScores = hand.Select(c => new
                 {
                     Card = c,
@@ -341,13 +2143,23 @@ namespace TractorGame.Core.AI
 
                 var selected = cardScores.Take(8).Select(x => x.Card).ToList();
                 ProtectPointCardsInBurySelection(selected, cardScores.Select(x => x.Card).ToList());
-                return selected;
+                return CreateOutcome(
+                    PhaseKind.BuryBottom,
+                    selected,
+                    new List<List<Card>> { selected },
+                    "ProtectBottom",
+                    "bury_ranked_selection",
+                    "legacy");
             }
-            else
-            {
-                // 简单策略：取最小的8张
-                return hand.OrderBy(c => c, comparer).Take(8).ToList();
-            }
+
+            var fallback = hand.OrderBy(c => c, comparer).Take(8).ToList();
+            return CreateOutcome(
+                PhaseKind.BuryBottom,
+                fallback,
+                new List<List<Card>> { fallback },
+                "ProtectBottom",
+                "bury_small_cards_fallback",
+                "legacy");
         }
 
         /// <summary>
@@ -1032,6 +2844,119 @@ namespace TractorGame.Core.AI
             var highCardWeight = cards.Sum(GetCardValue) / 60;
             var pointRisk = cards.Sum(GetCardPoints) * 8;
             return trumpWeight + highCardWeight + pointRisk;
+        }
+
+        private sealed class DecisionOutcome
+        {
+            public PhaseKind Phase { get; init; } = PhaseKind.Unknown;
+
+            public List<Card> SelectedCards { get; init; } = new();
+
+            public List<List<Card>> Candidates { get; init; } = new();
+
+            public string PrimaryIntent { get; init; } = "Unknown";
+
+            public string SelectedReason { get; init; } = "unspecified";
+
+            public string Path { get; init; } = "legacy";
+
+            public List<double> CandidateScores { get; init; } = new();
+
+            public List<string?> CandidateReasonCodes { get; init; } = new();
+
+            public List<Dictionary<string, double>> CandidateFeatures { get; init; } = new();
+
+            public List<string> Tags { get; init; } = new();
+
+            public DecisionExplanation? Explanation { get; init; }
+        }
+
+        private sealed class DecisionCompareSnapshot
+        {
+            public bool ShadowCompared { get; init; }
+
+            public bool Divergence { get; init; }
+
+            public string? OldPath { get; init; }
+
+            public string? NewPath { get; init; }
+
+            public List<Card> OldAction { get; init; } = new();
+
+            public List<Card> NewAction { get; init; } = new();
+
+            public string? OldReason { get; init; }
+
+            public string? NewReason { get; init; }
+
+            public string? OldIntent { get; init; }
+
+            public string? NewIntent { get; init; }
+
+            public int OldCandidateCount { get; init; }
+
+            public int NewCandidateCount { get; init; }
+        }
+
+        private sealed class CandidateMetadata
+        {
+            public double? Score { get; init; }
+
+            public string? ReasonCode { get; init; }
+
+            public Dictionary<string, double> Features { get; init; } = new();
+        }
+
+        private sealed class CandidateEvaluation
+        {
+            public List<Card> Cards { get; init; } = new();
+
+            public double Score { get; init; }
+
+            public string Reason { get; init; } = string.Empty;
+        }
+
+        private sealed class FollowCardGroup
+        {
+            public FollowCardGroup(Card card, int count)
+            {
+                Card = card;
+                Count = count;
+            }
+
+            public Card Card { get; }
+
+            public int Count { get; }
+        }
+
+        private sealed class SnakeCaseJsonNamingPolicy : JsonNamingPolicy
+        {
+            public static readonly SnakeCaseJsonNamingPolicy Instance = new();
+
+            public override string ConvertName(string name)
+            {
+                if (string.IsNullOrEmpty(name))
+                    return name;
+
+                var buffer = new System.Text.StringBuilder(name.Length + 8);
+                for (int index = 0; index < name.Length; index++)
+                {
+                    var ch = name[index];
+                    if (char.IsUpper(ch))
+                    {
+                        if (index > 0)
+                            buffer.Append('_');
+
+                        buffer.Append(char.ToLowerInvariant(ch));
+                    }
+                    else
+                    {
+                        buffer.Append(ch);
+                    }
+                }
+
+                return buffer.ToString();
+            }
         }
     }
 }

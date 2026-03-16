@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using TractorGame.Core.AI.V21;
 using TractorGame.Core.AI;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Models;
@@ -80,6 +81,15 @@ public sealed class GameSessionService
         return winnerPlay != null ? new List<Card>(winnerPlay.Cards) : new List<Card>(game.CurrentTrick[0].Cards);
     }
 
+    public int GetCurrentWinningPlayer(Game game)
+    {
+        if (game.CurrentTrick.Count == 0)
+            return -1;
+
+        var judge = new TrickJudge(BuildCurrentConfig(game));
+        return judge.DetermineWinner(game.CurrentTrick);
+    }
+
     public bool IsPartnerWinning(Game game, int playerIndex)
     {
         if (game.CurrentTrick.Count == 0)
@@ -88,6 +98,52 @@ public sealed class GameSessionService
         var judge = new TrickJudge(BuildCurrentConfig(game));
         int winner = judge.DetermineWinner(game.CurrentTrick);
         return winner != playerIndex && winner % 2 == playerIndex % 2;
+    }
+
+    public AIDecisionLogContext BuildAIDecisionLogContext(Game game, int playerIndex, string? actor = null)
+    {
+        return new AIDecisionLogContext
+        {
+            SessionId = game.SessionId,
+            GameId = game.GameId,
+            RoundId = game.RoundId,
+            TrickId = game.CurrentTrickId,
+            TurnId = game.CurrentTurnId,
+            PlayerIndex = playerIndex,
+            Actor = string.IsNullOrWhiteSpace(actor) ? $"player_{playerIndex}" : actor,
+            TrickIndex = game.CurrentTrickNo,
+            TurnIndex = game.CurrentTurnNo,
+            PlayPosition = game.CurrentTrick.Count + 1,
+            DealerIndex = game.State.DealerIndex,
+            CurrentWinningPlayer = GetCurrentWinningPlayer(game),
+            DefenderScore = game.State.DefenderScore,
+            BottomPoints = game.BottomCardsSnapshot.Sum(card => card.Score),
+            TruthSnapshot = BuildAIDebugTruthSnapshot(game)
+        };
+    }
+
+    public Dictionary<string, object?> BuildAIDebugTruthSnapshot(Game game)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["current_player"] = game.State.CurrentPlayer,
+            ["defender_score"] = game.State.DefenderScore,
+            ["hands_by_player"] = Enumerable.Range(0, 4)
+                .Select(index => new Dictionary<string, object?>
+                {
+                    ["player_index"] = index,
+                    ["cards"] = SerializeCards(game.State.PlayerHands[index])
+                })
+                .ToList(),
+            ["current_trick"] = game.CurrentTrick
+                .Select(play => new Dictionary<string, object?>
+                {
+                    ["player_index"] = play.PlayerIndex,
+                    ["cards"] = SerializeCards(play.Cards)
+                })
+                .ToList(),
+            ["bottom_cards"] = SerializeCards(game.BottomCardsSnapshot)
+        };
     }
 
     public static string GetSuitSymbol(Suit suit)
@@ -158,5 +214,16 @@ public sealed class GameSessionService
         if (trumpSuit.HasValue && suit == trumpSuit.Value)
             return 0;
         return 1;
+    }
+
+    private static List<Dictionary<string, object?>> SerializeCards(IEnumerable<Card> cards)
+    {
+        return cards.Select(card => new Dictionary<string, object?>
+        {
+            ["suit"] = card.Suit.ToString(),
+            ["rank"] = card.Rank.ToString(),
+            ["score"] = card.Score,
+            ["text"] = card.ToString()
+        }).ToList();
     }
 }

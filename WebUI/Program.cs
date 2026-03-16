@@ -8,9 +8,12 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+builder.Services.AddSingleton(new RuleAIOptionsProvider(builder.Configuration));
 builder.Services.AddScoped<LogRelayClient>();
+builder.Services.AddScoped<AIDecisionLoggerFactory>();
 builder.Services.AddScoped<UiMessageService>();
 builder.Services.AddScoped<UiAutomationService>();
+builder.Services.AddScoped<AIRuntimeSessionService>();
 builder.Services.AddScoped<AITurnService>();
 builder.Services.AddScoped<GameSessionService>();
 builder.Services.AddScoped<PlayerActionService>();

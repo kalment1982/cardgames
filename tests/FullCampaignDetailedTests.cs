@@ -15,6 +15,8 @@ namespace TractorGame.Tests
     /// 从2打到A的完整升级赛模拟 —— Markdown 详细记录版
     /// 每墩记录：出牌前手牌、出牌、胜负
     /// </summary>
+    [Trait("Category", "Campaign")]
+    [Trait("Category", "LongRunning")]
     public class FullCampaignDetailedTests
     {
         private readonly ITestOutputHelper _output;

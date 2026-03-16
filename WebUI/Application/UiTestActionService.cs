@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.AI;
+using TractorGame.Core.AI.V21;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
@@ -9,6 +10,23 @@ namespace WebUI.Application;
 
 public sealed class UiTestActionService
 {
+    private readonly RuleAIOptions _ruleAIOptions;
+    private readonly GameSessionService _gameSessionService;
+    private readonly AIDecisionLoggerFactory _decisionLoggerFactory;
+    private readonly AIRuntimeSessionService _aiRuntimeSessionService;
+
+    public UiTestActionService(
+        RuleAIOptionsProvider ruleAIOptionsProvider,
+        GameSessionService gameSessionService,
+        AIDecisionLoggerFactory decisionLoggerFactory,
+        AIRuntimeSessionService aiRuntimeSessionService)
+    {
+        _ruleAIOptions = ruleAIOptionsProvider.Options;
+        _gameSessionService = gameSessionService;
+        _decisionLoggerFactory = decisionLoggerFactory;
+        _aiRuntimeSessionService = aiRuntimeSessionService;
+    }
+
     public List<int> BuildAutoPlaySelection(
         Game game,
         GamePageViewModel vm,
@@ -20,14 +38,25 @@ public sealed class UiTestActionService
         bool partnerWinning)
     {
         var hand = new List<Card>(vm.PlayerHand);
-        var ai = new AIPlayer(config, AIDifficulty.Hard, currentSeed + actionCounter + 5000);
+        var championParams = ChampionLoader.LoadChampion();
         int currentPlayer = game.State.CurrentPlayer;
+        var ai = _aiRuntimeSessionService.GetOrCreatePlayer(
+            game,
+            currentPlayer,
+            index => new AIPlayer(
+                config,
+                AIDifficulty.Hard,
+                currentSeed + actionCounter + 5000 + index,
+                championParams,
+                decisionLogger: _decisionLoggerFactory.Create(),
+                ruleAIOptions: _ruleAIOptions));
         var otherPlayers = Enumerable.Range(0, 4)
             .Where(index => index != currentPlayer)
             .ToList();
         var knownBottomCards = currentPlayer == game.State.DealerIndex
             ? new List<Card>(game.State.BuriedCards)
             : null;
+        var logContext = _gameSessionService.BuildAIDecisionLogContext(game, currentPlayer);
 
         List<Card> selected = game.CurrentTrick.Count == 0
             ? ai.Lead(
@@ -35,13 +64,17 @@ public sealed class UiTestActionService
                 role,
                 myPosition: currentPlayer,
                 opponentPositions: otherPlayers,
-                knownBottomCards: knownBottomCards)
+                knownBottomCards: knownBottomCards,
+                logContext: logContext)
             : ai.Follow(
                 new List<Card>(hand),
                 game.CurrentTrick[0].Cards,
                 currentWinningCards,
                 role,
-                partnerWinning);
+                partnerWinning,
+                trickScore: game.CurrentTrick.Sum(play => play.Cards.Sum(card => card.Score)),
+                logContext: logContext,
+                visibleBottomCards: knownBottomCards);
 
         // 兜底：如果AI选牌不合法，自动生成保底合法选牌，避免测试死循环
         if (!IsSelectionValid(game, hand, selected))
@@ -53,12 +86,30 @@ public sealed class UiTestActionService
     }
 
     public List<int> BuildAutoBurySelection(
+        Game game,
         GamePageViewModel vm,
         int currentSeed,
         GameConfig config)
     {
-        var ai = new AIPlayer(config, AIDifficulty.Hard, currentSeed + 8000);
-        var selected = ai.BuryBottom(new List<Card>(vm.PlayerHand));
+        var championParams = ChampionLoader.LoadChampion();
+        var ai = _aiRuntimeSessionService.GetOrCreatePlayer(
+            game,
+            game.State.DealerIndex,
+            index => new AIPlayer(
+                config,
+                AIDifficulty.Hard,
+                currentSeed + 8000 + index,
+                championParams,
+                decisionLogger: _decisionLoggerFactory.Create(),
+                ruleAIOptions: _ruleAIOptions));
+        var logContext = _gameSessionService.BuildAIDecisionLogContext(game, game.State.DealerIndex);
+        var selected = ai.BuryBottom(
+            new List<Card>(vm.PlayerHand),
+            AIRole.Dealer,
+            null,
+            logContext: logContext,
+            defenderScore: game.State.DefenderScore,
+            cardsLeftMin: vm.PlayerHand.Count);
         return MapCardsToIndices(vm.PlayerHand, selected);
     }
 

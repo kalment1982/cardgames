@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.AI;
+using TractorGame.Core.AI.V21;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
 using Xunit;
@@ -9,6 +10,12 @@ namespace TractorGame.Tests
 {
     public class AIPlayerTests
     {
+        private static RuleAIOptions LegacyRuleAIOptions => new()
+        {
+            UseRuleAIV21 = false,
+            EnableShadowCompare = false
+        };
+
         private static AIPlayer CreateDeterministicHardAi(GameConfig config, int seed = 1)
         {
             var strategy = AIStrategyParameters.CreatePreset(AIDifficulty.Hard);
@@ -66,7 +73,7 @@ namespace TractorGame.Tests
         public void Follow_UsesTrumpToBeat_WhenNoLeadSuit()
         {
             var config = new GameConfig { LevelRank = Rank.Five, TrumpSuit = Suit.Heart };
-            var ai = new AIPlayer(config, AIDifficulty.Medium, 1);
+            var ai = new AIPlayer(config, AIDifficulty.Medium, 1, ruleAIOptions: LegacyRuleAIOptions);
             var hand = new List<Card>
             {
                 new Card(Suit.Heart, Rank.Ace),
@@ -189,6 +196,47 @@ namespace TractorGame.Tests
             var totalPoints = result.Select(c => c.Rank == Rank.King || c.Rank == Rank.Ten ? 10 :
                                               c.Rank == Rank.Five ? 5 : 0).Sum();
             Assert.True(totalPoints > 0);
+        }
+
+        [Fact]
+        public void Follow_WhenThreePairTractorLeadCannotBeFullyMatched_ReturnsLegalSuitFollow()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var ai = CreateDeterministicHardAi(config);
+            var validator = new FollowValidator(config);
+
+            var hand = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Queen), new Card(Suit.Diamond, Rank.Queen),
+                new Card(Suit.Club, Rank.Six),
+                new Card(Suit.Spade, Rank.Eight),
+                new Card(Suit.Heart, Rank.Four),
+                new Card(Suit.Club, Rank.Seven),
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Three), new Card(Suit.Diamond, Rank.Three),
+                new Card(Suit.Diamond, Rank.Six),
+                new Card(Suit.Diamond, Rank.Two),
+                new Card(Suit.Diamond, Rank.Ten),
+                new Card(Suit.Diamond, Rank.Five),
+                new Card(Suit.Diamond, Rank.Four)
+            };
+            var leadCards = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Nine), new Card(Suit.Diamond, Rank.Nine),
+                new Card(Suit.Diamond, Rank.Eight), new Card(Suit.Diamond, Rank.Eight),
+                new Card(Suit.Diamond, Rank.Seven), new Card(Suit.Diamond, Rank.Seven)
+            };
+
+            var result = ai.Follow(
+                hand,
+                leadCards,
+                currentWinningCards: leadCards,
+                role: AIRole.Opponent,
+                partnerWinning: false);
+
+            Assert.Equal(6, result.Count);
+            Assert.True(validator.IsValidFollow(hand, leadCards, result));
+            Assert.Equal(6, result.Count(card => !config.IsTrump(card) && card.Suit == Suit.Diamond));
         }
 
         [Fact]
@@ -319,6 +367,57 @@ namespace TractorGame.Tests
                 Assert.Equal(Suit.Spade, result[0].Suit);
                 Assert.Equal(Rank.Three, result[0].Rank);
             }
+        }
+
+        [Fact]
+        public void Follow_WhenTrumpTractorLedAndPartnerWinning_ReturnsLegalTrumpResponse()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var ai = CreateDeterministicHardAi(config, seed: 1);
+            var validator = new FollowValidator(config);
+
+            var hand = new List<Card>
+            {
+                new Card(Suit.Heart, Rank.Nine),
+                new Card(Suit.Diamond, Rank.Queen),
+                new Card(Suit.Club, Rank.Jack),
+                new Card(Suit.Spade, Rank.Three),
+                new Card(Suit.Spade, Rank.Two),
+                new Card(Suit.Club, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Nine),
+                new Card(Suit.Diamond, Rank.Ten),
+                new Card(Suit.Club, Rank.Jack),
+                new Card(Suit.Club, Rank.Two),
+                new Card(Suit.Heart, Rank.Queen),
+                new Card(Suit.Diamond, Rank.Five),
+                new Card(Suit.Spade, Rank.Seven),
+                new Card(Suit.Heart, Rank.Jack),
+                new Card(Suit.Spade, Rank.Eight),
+                new Card(Suit.Club, Rank.Two),
+                new Card(Suit.Spade, Rank.Ace),
+                new Card(Suit.Spade, Rank.Queen),
+                new Card(Suit.Club, Rank.Queen)
+            };
+
+            var leadCards = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Eight),
+                new Card(Suit.Club, Rank.Eight),
+                new Card(Suit.Club, Rank.Seven),
+                new Card(Suit.Club, Rank.Seven)
+            };
+
+            var currentWinningCards = new List<Card>(leadCards);
+
+            var result = ai.Follow(
+                hand,
+                leadCards,
+                currentWinningCards: currentWinningCards,
+                role: AIRole.Opponent,
+                partnerWinning: true);
+
+            Assert.Equal(4, result.Count);
+            Assert.True(validator.IsValidFollow(hand, leadCards, result));
         }
 
         [Fact]

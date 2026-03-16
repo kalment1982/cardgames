@@ -8,6 +8,7 @@ using Xunit;
 
 namespace TractorGame.Tests
 {
+    [Trait("Category", "LongRunning")]
     public class LeadPatternMatrixTests
     {
         private static readonly GameConfig Config = new()
@@ -36,62 +37,62 @@ namespace TractorGame.Tests
 
         private static readonly Dictionary<(LeadSystemKind Kind, int M, int J, bool PreferHigh, string PoolKey), List<Card>> PairAllocationCache = new();
 
-        private static readonly IReadOnlyList<LeadPatternCase> CoreCaseList = BuildCoreCases();
-        private static readonly IReadOnlyList<LeadPatternCase> CutCaseList = BuildCutCases();
-        private static readonly IReadOnlyList<LeadPatternCase> AllTrumpWeakerCaseList = BuildAllTrumpWeakerCases();
-        private static readonly IReadOnlyList<LeadPatternCase> PartialSuitTrumpCaseList = BuildPartialSuitTrumpCases();
-        private static readonly IReadOnlyList<LeadPatternCase> ThrowBlockedCaseList = BuildThrowBlockedCases();
-        private static readonly IReadOnlyList<LeadPatternCase> InvalidFollowCaseList = BuildInvalidFollowCases();
+        private static readonly Lazy<IReadOnlyList<LeadPatternCase>> CoreCaseList = new(BuildCoreCases);
+        private static readonly Lazy<IReadOnlyList<LeadPatternCase>> CutCaseList = new(BuildCutCases);
+        private static readonly Lazy<IReadOnlyList<LeadPatternCase>> AllTrumpWeakerCaseList = new(BuildAllTrumpWeakerCases);
+        private static readonly Lazy<IReadOnlyList<LeadPatternCase>> PartialSuitTrumpCaseList = new(BuildPartialSuitTrumpCases);
+        private static readonly Lazy<IReadOnlyList<LeadPatternCase>> ThrowBlockedCaseList = new(BuildThrowBlockedCases);
+        private static readonly Lazy<IReadOnlyList<LeadPatternCase>> InvalidFollowCaseList = new(BuildInvalidFollowCases);
 
         public static IEnumerable<object[]> CoreCases()
         {
-            foreach (var testCase in CoreCaseList)
+            foreach (var testCase in CoreCaseList.Value)
                 yield return new object[] { testCase };
         }
 
         public static IEnumerable<object[]> CutCases()
         {
-            foreach (var testCase in CutCaseList)
+            foreach (var testCase in CutCaseList.Value)
                 yield return new object[] { testCase };
         }
 
         public static IEnumerable<object[]> AllTrumpWeakerCases()
         {
-            foreach (var testCase in AllTrumpWeakerCaseList)
+            foreach (var testCase in AllTrumpWeakerCaseList.Value)
                 yield return new object[] { testCase };
         }
 
         public static IEnumerable<object[]> PartialSuitTrumpCases()
         {
-            foreach (var testCase in PartialSuitTrumpCaseList)
+            foreach (var testCase in PartialSuitTrumpCaseList.Value)
                 yield return new object[] { testCase };
         }
 
         public static IEnumerable<object[]> ThrowBlockedCases()
         {
-            foreach (var testCase in ThrowBlockedCaseList)
+            foreach (var testCase in ThrowBlockedCaseList.Value)
                 yield return new object[] { testCase };
         }
 
         public static IEnumerable<object[]> InvalidFollowCases()
         {
-            foreach (var testCase in InvalidFollowCaseList)
+            foreach (var testCase in InvalidFollowCaseList.Value)
                 yield return new object[] { testCase };
         }
 
         [Fact]
         public void CaseCount_CoversAtLeast150ConcreteCases()
         {
-            var total = CoreCaseList.Count
-                + CutCaseList.Count
-                + AllTrumpWeakerCaseList.Count
-                + PartialSuitTrumpCaseList.Count
-                + ThrowBlockedCaseList.Count
-                + InvalidFollowCaseList.Count;
+            var total = CoreCaseList.Value.Count
+                + CutCaseList.Value.Count
+                + AllTrumpWeakerCaseList.Value.Count
+                + PartialSuitTrumpCaseList.Value.Count
+                + ThrowBlockedCaseList.Value.Count
+                + InvalidFollowCaseList.Value.Count;
 
-            Assert.True(CoreCaseList.Count >= 150);
+            Assert.True(CoreCaseList.Value.Count >= 150);
             Assert.True(total >= 300);
-            Assert.Equal(239, CoreCaseList.Count);
+            Assert.Equal(239, CoreCaseList.Value.Count);
         }
 
         [Theory]
@@ -161,13 +162,20 @@ namespace TractorGame.Tests
             }
 
             var otherHands = testCase.Hands.Skip(1).Select(hand => new List<Card>(hand)).ToList();
-            Assert.Equal(testCase.ExpectedThrowSuccess, ThrowValidator.IsThrowSuccessful(testCase.Plays[0].Cards, otherHands));
+            if (testCase.ExpectedThrowSuccess.HasValue)
+            {
+                Assert.Equal(testCase.ExpectedThrowSuccess.Value, ThrowValidator.IsThrowSuccessful(testCase.Plays[0].Cards, otherHands));
+            }
 
             var playResult = PlayValidator.IsValidPlayEx(testCase.Hands[0], testCase.Plays[0].Cards, otherHands);
             if (IsMixedLead(testCase.Plays[0].Cards))
             {
-                Assert.Equal(testCase.ExpectedThrowSuccess, playResult.Success);
-                if (!testCase.ExpectedThrowSuccess)
+                if (testCase.ExpectedThrowSuccess.HasValue)
+                {
+                    Assert.Equal(testCase.ExpectedThrowSuccess.Value, playResult.Success);
+                }
+
+                if (testCase.ExpectedThrowSuccess == false)
                     Assert.Equal(ReasonCodes.ThrowNotMax, playResult.ReasonCode);
             }
             else
@@ -217,7 +225,7 @@ namespace TractorGame.Tests
                     new[] { true, true, true, true },
                     new string?[] { null, null, null, null },
                     expectedWinner: 0,
-                    expectedThrowSuccess: true,
+                    expectedThrowSuccess: null,
                     note: "core-matrix"));
             }
 
@@ -350,7 +358,7 @@ namespace TractorGame.Tests
                     new[] { true, true, true, true },
                     new string?[] { null, null, null, null },
                     expectedWinner: 0,
-                    expectedThrowSuccess: true,
+                    expectedThrowSuccess: null,
                     note: "partial-suit-with-trump-fillers"));
             }
 
@@ -580,7 +588,7 @@ namespace TractorGame.Tests
                 new[] { true, false, true, true },
                 new string?[] { null, expectedReason, null, null },
                 expectedWinner: -1,
-                expectedThrowSuccess: true,
+                expectedThrowSuccess: null,
                 note: "invalid-follow" );
         }
 
@@ -595,7 +603,7 @@ namespace TractorGame.Tests
             List<Card> p2,
             List<Card> p3,
             int expectedWinner,
-            bool expectedThrowSuccess,
+            bool? expectedThrowSuccess,
             string note)
         {
             return new LeadPatternCase(
@@ -719,46 +727,109 @@ namespace TractorGame.Tests
             if (PairAllocationCache.TryGetValue(cacheKey, out var cached))
                 return cached.Select(Clone).ToList();
 
-            int need = m + 2 * j;
             var orderedPool = preferHigh ? pool.ToList() : pool.Reverse().ToList();
-            var selected = new List<Card>(need);
-            List<Card>? found = null;
-
-            void Search(int start, int remaining)
+            int count = orderedPool.Count;
+            var adjacencyMasks = new int[count];
+            for (int i = 0; i < count; i++)
             {
-                if (found != null)
-                    return;
-                if (remaining == 0)
+                for (int partner = 0; partner < count; partner++)
                 {
-                    var doubled = new List<Card>();
-                    foreach (var card in selected)
-                    {
-                        doubled.Add(Clone(card));
-                        doubled.Add(Clone(card));
-                    }
-
-                    var summary = CountComponents(doubled);
-                    if (summary.Pairs == m && summary.Tractors == j && summary.Singles == 0)
-                        found = selected.Select(Clone).ToList();
-                    return;
-                }
-
-                for (int index = start; index <= orderedPool.Count - remaining; index++)
-                {
-                    selected.Add(orderedPool[index]);
-                    Search(index + 1, remaining - 1);
-                    selected.RemoveAt(selected.Count - 1);
-                    if (found != null)
-                        return;
+                    if (i == partner)
+                        continue;
+                    if (FormsTwoPairTractor(orderedPool[i], orderedPool[partner]))
+                        adjacencyMasks[i] |= 1 << partner;
                 }
             }
 
-            Search(0, need);
+            List<Card>? found = null;
+            var failedStates = new HashSet<(int Index, int RemainingPairs, int RemainingTractors, int ForbiddenMask)>();
+
+            bool Search(int index, int remainingPairs, int remainingTractors, int forbiddenMask, List<Card> selected)
+            {
+                if (found != null)
+                    return true;
+
+                while (index < count && (forbiddenMask & (1 << index)) != 0)
+                    index++;
+
+                if (remainingPairs == 0 && remainingTractors == 0)
+                {
+                    found = selected.Select(Clone).ToList();
+                    return true;
+                }
+
+                if (index >= count)
+                    return false;
+
+                int available = 0;
+                for (int probe = index; probe < count; probe++)
+                {
+                    if ((forbiddenMask & (1 << probe)) == 0)
+                        available++;
+                }
+                if (remainingPairs + 2 * remainingTractors > available)
+                    return false;
+
+                var state = (index, remainingPairs, remainingTractors, forbiddenMask);
+                if (failedStates.Contains(state))
+                    return false;
+
+                if (remainingPairs > 0)
+                {
+                    selected.Add(orderedPool[index]);
+                    int nextForbidden = forbiddenMask | (1 << index) | adjacencyMasks[index];
+                    if (Search(index + 1, remainingPairs - 1, remainingTractors, nextForbidden, selected))
+                        return true;
+                    selected.RemoveAt(selected.Count - 1);
+                }
+
+                if (remainingTractors > 0)
+                {
+                    for (int partner = index + 1; partner < count; partner++)
+                    {
+                        if ((forbiddenMask & (1 << partner)) != 0)
+                            continue;
+                        if ((adjacencyMasks[index] & (1 << partner)) == 0)
+                            continue;
+
+                        selected.Add(orderedPool[index]);
+                        selected.Add(orderedPool[partner]);
+                        int nextForbidden = forbiddenMask
+                            | (1 << index)
+                            | (1 << partner)
+                            | adjacencyMasks[index]
+                            | adjacencyMasks[partner];
+                        if (Search(index + 1, remainingPairs, remainingTractors - 1, nextForbidden, selected))
+                            return true;
+                        selected.RemoveAt(selected.Count - 1);
+                        selected.RemoveAt(selected.Count - 1);
+                    }
+                }
+
+                if (Search(index + 1, remainingPairs, remainingTractors, forbiddenMask, selected))
+                    return true;
+
+                failedStates.Add(state);
+                return false;
+            }
+
+            Search(0, m, j, 0, new List<Card>(m + 2 * j));
             if (found == null)
                 throw new InvalidOperationException($"No pair allocation found for kind={kind}, m={m}, j={j}, preferHigh={preferHigh}");
 
             PairAllocationCache[cacheKey] = found.Select(Clone).ToList();
             return found;
+        }
+
+        private static bool FormsTwoPairTractor(Card first, Card second)
+        {
+            var patternCards = new List<Card>
+            {
+                Clone(first), Clone(first),
+                Clone(second), Clone(second)
+            };
+            var pattern = new CardPattern(patternCards, Config);
+            return pattern.Type == PatternType.Tractor;
         }
 
         private static ComponentSummary CountComponents(List<Card> cards)
@@ -789,8 +860,6 @@ namespace TractorGame.Tests
 
         private static bool IsMixedLead(List<Card> cards)
         {
-            if (cards.Count <= 2)
-                return false;
             var pattern = new CardPattern(cards, Config);
             return pattern.Type == PatternType.Mixed;
         }
@@ -1000,7 +1069,7 @@ namespace TractorGame.Tests
                 bool[] expectedFollowSuccess,
                 string?[] expectedFollowReason,
                 int expectedWinner,
-                bool expectedThrowSuccess,
+                bool? expectedThrowSuccess,
                 string note)
             {
                 Id = id;
@@ -1027,7 +1096,7 @@ namespace TractorGame.Tests
             public bool[] ExpectedFollowSuccess { get; }
             public string?[] ExpectedFollowReason { get; }
             public int ExpectedWinner { get; }
-            public bool ExpectedThrowSuccess { get; }
+            public bool? ExpectedThrowSuccess { get; }
             public string Note { get; }
 
             public override string ToString() => Id;

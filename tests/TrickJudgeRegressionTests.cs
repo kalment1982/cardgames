@@ -131,5 +131,47 @@ namespace TractorGame.Tests
             var winner = judge.DetermineWinner(plays);
             Assert.Equal(1, winner);
         }
+
+        [Fact]
+        public void DetermineWinner_PartialSuitFollowWithTrumpFiller_DoesNotBeatLead()
+        {
+            // 用户日志回归：
+            // 设主：♦，打2。南首发：♠Q ♠J
+            // 西跟牌：♠5 ♦4（只跟出1张黑桃，另1张是主牌补缺）
+            // 该手属于“部分跟同门 + 主牌垫/毙”，不应压过完整首发。
+            var config = new GameConfig
+            {
+                LevelRank = Rank.Two,
+                TrumpSuit = Suit.Diamond
+            };
+            var judge = new TrickJudge(config);
+
+            var plays = new List<TrickPlay>
+            {
+                new TrickPlay(0, new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Queen),
+                    new Card(Suit.Spade, Rank.Jack)
+                }),
+                new TrickPlay(1, new List<Card>
+                {
+                    new Card(Suit.Club, Rank.Ace),
+                    new Card(Suit.Heart, Rank.Ace)
+                }),
+                new TrickPlay(2, new List<Card>
+                {
+                    new Card(Suit.Heart, Rank.Ten),
+                    new Card(Suit.Heart, Rank.Five)
+                }),
+                new TrickPlay(3, new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Five),
+                    new Card(Suit.Diamond, Rank.Four)
+                })
+            };
+
+            var winner = judge.DetermineWinner(plays);
+            Assert.Equal(0, winner);
+        }
     }
 }

@@ -66,8 +66,8 @@ namespace TractorGame.Core.Rules
             if (!baseResult.Success)
                 return baseResult;
 
-            // 单张、对子、拖拉机不需要额外验证
-            if (cardsToPlay.Count <= 2)
+            // 单张、对子不需要额外验证
+            if (cardsToPlay.Count == 1 || CardPattern.IsPair(cardsToPlay))
                 return OperationResult.Ok;
 
             var pattern = new CardPattern(cardsToPlay, _config);
@@ -129,7 +129,7 @@ namespace TractorGame.Core.Rules
 
             // 检查是否为对子
             if (cards.Count == 2)
-                return CardPattern.IsPair(cards);
+                return CardPattern.IsPair(cards) || ValidateMixedPattern(cards);
 
             // 检查是否为拖拉机
             var pattern = new CardPattern(cards, _config);

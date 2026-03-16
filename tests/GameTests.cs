@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using TractorGame.Core.Models;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Logging;
+using TractorGame.Core.Rules;
 
 namespace TractorGame.Tests
 {
@@ -155,6 +156,32 @@ namespace TractorGame.Tests
 
             Assert.False(check.Success);
             Assert.Equal(ReasonCodes.BidPriorityTooLow, check.ReasonCode);
+        }
+
+        [Fact]
+        public void PlayCardsEx_FollowUsesCurrentLevelRank_NotDefaultTwo()
+        {
+            var game = new Game(1);
+            game.State.LevelRank = Rank.Three;
+            game.StartGame();
+
+            game.State.TrumpSuit = Suit.Diamond;
+            game.State.Phase = GamePhase.Playing;
+            game.State.CurrentPlayer = 1;
+            game.CurrentTrick.Clear();
+            game.CurrentTrick.Add(new TrickPlay(0, new List<Card> { new Card(Suit.Spade, Rank.Ace) }));
+
+            game.State.PlayerHands[1] = new List<Card>
+            {
+                new Card(Suit.Spade, Rank.Two),
+                new Card(Suit.Spade, Rank.King),
+                new Card(Suit.Diamond, Rank.Three)
+            };
+
+            var result = game.PlayCardsEx(1, new List<Card> { new Card(Suit.Spade, Rank.Two) });
+
+            Assert.True(result.Success);
+            Assert.Equal(2, game.State.PlayerHands[1].Count);
         }
 
         private static void DealToEnd(Game game)
