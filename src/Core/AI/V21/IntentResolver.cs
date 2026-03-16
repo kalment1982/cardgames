@@ -136,8 +136,8 @@ namespace TractorGame.Core.AI.V21
                 int opponentsBehind = threatAnalyzer.CountOpponentsBehind(context);
                 bool highScoreTrick = context.TrickScore >= 10;
                 bool scoringTrickWithOpponentBehind = context.TrickScore >= 5 && opponentsBehind > 0;
-                bool currentWinnerIsOpponent = context.CurrentWinningPlayer < 0 ||
-                    !IsTeammate(context.PlayerIndex, context.CurrentWinningPlayer);
+                bool currentWinnerIsOpponent = context.DecisionFrame.CurrentWinningPlayer < 0 ||
+                    !IsTeammate(context.PlayerIndex, context.DecisionFrame.CurrentWinningPlayer);
                 bool hasStableWinningCandidate = winningCandidates.Any(candidate =>
                     threatAnalyzer.Analyze(context, candidate, currentWinning).SecurityLevel >= WinSecurityLevel.Stable);
                 bool critical = context.DecisionFrame.ScorePressure == ScorePressureLevel.Critical ||
