@@ -90,7 +90,7 @@ namespace TractorGame.Tests
 
             Assert.True(result);
             Assert.Equal(24, game.State.PlayerHands[0].Count);
-            Assert.Equal(1, game.State.CurrentPlayer);
+            Assert.Equal(3, game.State.CurrentPlayer);
         }
 
         [Fact]
@@ -130,17 +130,17 @@ namespace TractorGame.Tests
             game.CurrentTrick.Clear();
 
             Assert.True(game.PlayCards(0, new List<Card> { new Card(Suit.Heart, Rank.Ace) }));
-            Assert.True(game.PlayCards(1, new List<Card> { new Card(Suit.Heart, Rank.King) }));
-            Assert.True(game.PlayCards(2, new List<Card> { new Card(Suit.Heart, Rank.Queen) }));
             Assert.True(game.PlayCards(3, new List<Card> { new Card(Suit.Heart, Rank.Jack) }));
+            Assert.True(game.PlayCards(2, new List<Card> { new Card(Suit.Heart, Rank.Queen) }));
+            Assert.True(game.PlayCards(1, new List<Card> { new Card(Suit.Heart, Rank.King) }));
 
             Assert.Empty(game.CurrentTrick);
             Assert.Equal(1, game.LastCompletedTrickNo);
             Assert.Equal(4, game.LastCompletedTrick.Count);
             Assert.Equal(0, game.LastCompletedTrick[0].PlayerIndex);
             Assert.Equal(new Card(Suit.Heart, Rank.Ace), game.LastCompletedTrick[0].Cards[0]);
-            Assert.Equal(3, game.LastCompletedTrick[3].PlayerIndex);
-            Assert.Equal(new Card(Suit.Heart, Rank.Jack), game.LastCompletedTrick[3].Cards[0]);
+            Assert.Equal(1, game.LastCompletedTrick[3].PlayerIndex);
+            Assert.Equal(new Card(Suit.Heart, Rank.King), game.LastCompletedTrick[3].Cards[0]);
         }
 
         [Fact]
@@ -182,6 +182,34 @@ namespace TractorGame.Tests
 
             Assert.True(result.Success);
             Assert.Equal(2, game.State.PlayerHands[1].Count);
+        }
+
+        [Fact]
+        public void PlayCards_FollowsClockwiseSeatOrder()
+        {
+            var game = new Game(1);
+            game.State.Phase = GamePhase.Playing;
+            game.State.CurrentPlayer = 0;
+            game.State.TrumpSuit = Suit.Spade;
+            game.State.LevelRank = Rank.Two;
+            game.CurrentTrick.Clear();
+
+            game.State.PlayerHands[0] = new List<Card> { new Card(Suit.Heart, Rank.Ace) };
+            game.State.PlayerHands[1] = new List<Card> { new Card(Suit.Heart, Rank.King) };
+            game.State.PlayerHands[2] = new List<Card> { new Card(Suit.Heart, Rank.Queen) };
+            game.State.PlayerHands[3] = new List<Card> { new Card(Suit.Heart, Rank.Jack) };
+
+            Assert.True(game.PlayCards(0, new List<Card> { new Card(Suit.Heart, Rank.Ace) }));
+            Assert.Equal(3, game.State.CurrentPlayer);
+
+            Assert.True(game.PlayCards(3, new List<Card> { new Card(Suit.Heart, Rank.Jack) }));
+            Assert.Equal(2, game.State.CurrentPlayer);
+
+            Assert.True(game.PlayCards(2, new List<Card> { new Card(Suit.Heart, Rank.Queen) }));
+            Assert.Equal(1, game.State.CurrentPlayer);
+
+            Assert.True(game.PlayCards(1, new List<Card> { new Card(Suit.Heart, Rank.King) }));
+            Assert.Equal(0, game.State.CurrentPlayer);
         }
 
         private static void DealToEnd(Game game)

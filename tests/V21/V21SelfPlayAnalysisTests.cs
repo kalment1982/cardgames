@@ -381,6 +381,7 @@ namespace TractorGame.Tests.V21
                     return Get.Int(p, "trick_score") >= 15
                         && Get.Str(p, "phase") == "Follow"
                         && !Get.Bool(p, "partner_winning")
+                        && Get.Bool(p, "has_secure_winning_candidate")
                         && Get.Str(p, "primary_intent") == "MinimizeLoss";
                 },
                 DescriptionBuilder = e =>

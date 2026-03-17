@@ -340,9 +340,17 @@ namespace TractorGame.Core.AI.V21
 
         public int BottomPoints { get; init; }
 
+        public int PlayedScoreTotal { get; init; }
+
+        public int RemainingScoreTotal { get; init; }
+
+        public int RemainingScoreCards { get; init; }
+
         public RiskLevel BottomRiskPressure { get; init; } = RiskLevel.None;
 
         public RiskLevel DealerRetentionRisk { get; init; } = RiskLevel.None;
+
+        public RiskLevel BottomContestPressure { get; init; } = RiskLevel.None;
 
         public ScorePressureLevel ScorePressure { get; init; } = ScorePressureLevel.Relaxed;
 

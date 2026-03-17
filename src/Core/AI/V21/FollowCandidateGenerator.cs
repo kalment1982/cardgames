@@ -93,6 +93,9 @@ namespace TractorGame.Core.AI.V21
                 if (winningSingles.Count > 0)
                 {
                     AddSingletonCandidate(candidates, winningSingles[0]);
+
+                    int lowerMidIndex = System.Math.Max(0, (winningSingles.Count / 2) - 1);
+                    AddSingletonCandidate(candidates, winningSingles[lowerMidIndex]);
                     AddSingletonCandidate(candidates, winningSingles[winningSingles.Count / 2]);
 
                     var firstStable = winningSingles
@@ -213,6 +216,14 @@ namespace TractorGame.Core.AI.V21
             candidates.Add(AppendFiller(
                 mustFollow,
                 remaining.OrderBy(card => RuleAIUtility.EstimateSingleCardDiscardCost(_config, remaining, card, comparer))
+                    .ThenBy(card => card, comparer)
+                    .ToList(),
+                missing));
+
+            candidates.Add(AppendFiller(
+                mustFollow,
+                remaining.OrderBy(card => card.Score)
+                    .ThenBy(card => RuleAIUtility.GetCardValue(card, _config))
                     .ThenBy(card => card, comparer)
                     .ToList(),
                 missing));

@@ -55,6 +55,7 @@ namespace TractorGame.Core.AI.V21
         private ResolvedIntent ResolveLeadIntent(RuleAIContext context, IReadOnlyList<List<Card>>? candidates)
         {
             bool endgame = context.DecisionFrame.EndgameLevel != EndgameLevel.None;
+            bool contestBottom = context.DecisionFrame.BottomContestPressure >= RiskLevel.Medium;
             bool protectBottom = context.DecisionFrame.BottomRiskPressure >= RiskLevel.High ||
                 context.DecisionFrame.DealerRetentionRisk >= RiskLevel.High;
             bool hasThrow = (candidates ?? new List<List<Card>>()).Any(cards =>
@@ -67,6 +68,11 @@ namespace TractorGame.Core.AI.V21
             if (endgame && protectBottom)
             {
                 return BuildIntent(context, DecisionIntentKind.PrepareEndgame, DecisionIntentKind.ProtectBottom, "ProtectBottomEndgame");
+            }
+
+            if (endgame && contestBottom)
+            {
+                return BuildIntent(context, DecisionIntentKind.PrepareEndgame, DecisionIntentKind.TakeScore, "ContestBottom");
             }
 
             if (protectBottom)
@@ -109,12 +115,18 @@ namespace TractorGame.Core.AI.V21
                     .ToList()
                 : new List<List<Card>>();
             bool hasWinningCandidate = winningCandidates.Count > 0;
+            bool contestBottom = context.DecisionFrame.BottomContestPressure >= RiskLevel.Medium;
 
             if (context.DecisionFrame.EndgameLevel != EndgameLevel.None &&
                 (context.DecisionFrame.BottomRiskPressure >= RiskLevel.High ||
                  context.DecisionFrame.DealerRetentionRisk >= RiskLevel.High))
             {
                 return BuildIntent(context, DecisionIntentKind.PrepareEndgame, DecisionIntentKind.ProtectBottom, "HighScoreOrEndgame");
+            }
+
+            if (context.DecisionFrame.EndgameLevel != EndgameLevel.None && contestBottom && hasWinningCandidate)
+            {
+                return BuildIntent(context, DecisionIntentKind.PrepareEndgame, DecisionIntentKind.TakeScore, "ContestBottom");
             }
 
             if (context.DecisionFrame.BottomRiskPressure >= RiskLevel.High ||
@@ -125,6 +137,32 @@ namespace TractorGame.Core.AI.V21
 
             if (context.PartnerWinning)
             {
+                int opponentsBehind = threatAnalyzer.CountOpponentsBehind(context);
+                bool scoringTrickWithOpponentBehind = context.TrickScore >= 5 && opponentsBehind > 0;
+                bool lastOpponentBehind = opponentsBehind == 1 && context.DecisionFrame.PlayPosition >= 3;
+                bool hasStableWinningCandidate = winningCandidates.Any(candidate =>
+                    threatAnalyzer.Analyze(context, candidate, currentWinning).SecurityLevel >= WinSecurityLevel.Stable);
+                double cheapestWinCost = hasWinningCandidate
+                    ? winningCandidates.Min(candidate =>
+                        candidate.Count(_config.IsTrump) * 1.5 + RuleAIUtility.CountHighControlCards(_config, candidate) * 2.0)
+                    : double.MaxValue;
+                bool affordableWinningTakeover = hasWinningCandidate &&
+                    cheapestWinCost <= 1.0 + context.DifficultyProfile.CheapOvertakeTolerance;
+                bool highValueMateProtection = context.TrickScore >= 10 ||
+                    (context.DecisionFrame.ScorePressure == ScorePressureLevel.Critical && context.TrickScore >= 5);
+
+                if (affordableWinningTakeover &&
+                    scoringTrickWithOpponentBehind &&
+                    highValueMateProtection &&
+                    (hasStableWinningCandidate || lastOpponentBehind))
+                {
+                    return BuildIntent(
+                        context,
+                        DecisionIntentKind.TakeScore,
+                        DecisionIntentKind.PreserveStructure,
+                        hasStableWinningCandidate ? "ProtectMateScoringTrick" : "ReinforceMateFragileLead");
+                }
+
                 var mode = context.InferenceSnapshot.MateHoldConfidence.Probability >= 0.65
                     ? "MateWinningSecure"
                     : "MateWinningFragile";
@@ -142,13 +180,15 @@ namespace TractorGame.Core.AI.V21
                     threatAnalyzer.Analyze(context, candidate, currentWinning).SecurityLevel >= WinSecurityLevel.Stable);
                 bool critical = context.DecisionFrame.ScorePressure == ScorePressureLevel.Critical ||
                     context.TrickScore >= context.DifficultyProfile.TakeScoreThreshold;
-                bool promoteToTakeScore = highScoreTrick ||
-                    scoringTrickWithOpponentBehind ||
-                    (currentWinnerIsOpponent && hasStableWinningCandidate) ||
-                    context.DecisionFrame.BottomRiskPressure >= RiskLevel.High ||
-                    context.DecisionFrame.DealerRetentionRisk >= RiskLevel.High;
                 double cheapestWinCost = winningCandidates
                     .Min(candidate => candidate.Count(_config.IsTrump) * 1.5 + RuleAIUtility.CountHighControlCards(_config, candidate) * 2.0);
+                bool promoteToTakeScore = highScoreTrick || scoringTrickWithOpponentBehind;
+                bool affordableStableWin = hasStableWinningCandidate &&
+                    cheapestWinCost <= 1.0 + context.DifficultyProfile.CheapOvertakeTolerance;
+                promoteToTakeScore = promoteToTakeScore ||
+                    (currentWinnerIsOpponent && affordableStableWin) ||
+                    context.DecisionFrame.BottomRiskPressure >= RiskLevel.High ||
+                    context.DecisionFrame.DealerRetentionRisk >= RiskLevel.High;
 
                 if (!critical && !promoteToTakeScore &&
                     cheapestWinCost > 1.0 + context.DifficultyProfile.CheapOvertakeTolerance)

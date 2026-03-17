@@ -1135,6 +1135,17 @@ namespace TractorGame.Core.AI
         {
             var explanation = BuildDecisionExplanation(context, outcome);
             var entry = CreateAiLogEntry("ai.decision", LogCategories.Decision, context, logContext, decisionTraceId);
+            int winningCandidateCount = outcome.CandidateFeatures.Count == outcome.Candidates.Count
+                ? outcome.CandidateFeatures.Count(features => features.GetValueOrDefault("TrickWinValue") > 0)
+                : 0;
+            int secureWinningCandidateCount = outcome.CandidateFeatures.Count == outcome.Candidates.Count
+                ? outcome.CandidateFeatures.Count(features =>
+                    features.GetValueOrDefault("TrickWinValue") > 0 &&
+                    features.GetValueOrDefault("WinSecurityValue") >= 2.0)
+                : 0;
+            double maxCandidateWinSecurity = outcome.CandidateFeatures.Count > 0
+                ? outcome.CandidateFeatures.Max(features => features.GetValueOrDefault("WinSecurityValue"))
+                : 0;
 
             entry.Payload = new Dictionary<string, object?>
             {
@@ -1157,6 +1168,11 @@ namespace TractorGame.Core.AI
                 ["risk_flags"] = explanation.RiskFlags,
                 ["selected_action_features"] = explanation.SelectedActionFeatures,
                 ["tags"] = explanation.Tags,
+                ["has_winning_candidate"] = winningCandidateCount > 0,
+                ["winning_candidate_count"] = winningCandidateCount,
+                ["has_secure_winning_candidate"] = secureWinningCandidateCount > 0,
+                ["secure_winning_candidate_count"] = secureWinningCandidateCount,
+                ["max_candidate_win_security"] = maxCandidateWinSecurity,
                 ["hand_count"] = context.HandCount,
                 ["trump_count"] = context.TrumpCount,
                 ["point_card_count"] = context.PointCardCount,

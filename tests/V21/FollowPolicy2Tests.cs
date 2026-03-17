@@ -154,5 +154,158 @@ namespace TractorGame.Tests.V21
                 "♥9,♥J",
                 string.Join(",", decision.SelectedCards.Select(card => card.ToString()).OrderBy(text => text)));
         }
+
+        [Fact]
+        public void Decide_WhenScoringTrumpSingleHasOpponentBehind_UsesCheapestStableWin()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Eight),
+                new Card(Suit.Club, Rank.Ten),
+                new Card(Suit.Club, Rank.King),
+                new Card(Suit.Club, Rank.Two),
+                new Card(Suit.Spade, Rank.Ace),
+                new Card(Suit.Heart, Rank.King),
+                new Card(Suit.Diamond, Rank.Seven)
+            };
+            var context = new RuleAIContextBuilder(config, AIDifficulty.Hard, null, new CardMemory(config)).BuildFollowContext(
+                hand,
+                new List<Card> { new Card(Suit.Club, Rank.Five) },
+                new List<Card> { new Card(Suit.Club, Rank.Seven) },
+                AIRole.Opponent,
+                partnerWinning: false,
+                trickScore: 5,
+                playerIndex: 3,
+                dealerIndex: 0,
+                trickIndex: 3,
+                turnIndex: 11,
+                playPosition: 3,
+                currentWinningPlayer: 2);
+
+            var policy = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                new IntentResolver(config),
+                new ActionScorer(config),
+                new DecisionExplainer());
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal("TakeScore", decision.Explanation.PrimaryIntent);
+            Assert.Single(decision.SelectedCards);
+            Assert.Equal(Suit.Club, decision.SelectedCards[0].Suit);
+            Assert.Equal(Rank.King, decision.SelectedCards[0].Rank);
+        }
+
+        [Fact]
+        public void Decide_WhenShortageFollow_MinimizeLoss_AvoidsBurningHighSideCards()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Club };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Seven),
+                new Card(Suit.Heart, Rank.Queen),
+                new Card(Suit.Club, Rank.King),
+                new Card(Suit.Club, Rank.Six),
+                new Card(Suit.Joker, Rank.BigJoker),
+                new Card(Suit.Spade, Rank.Five),
+                new Card(Suit.Heart, Rank.Ace),
+                new Card(Suit.Spade, Rank.Three),
+                new Card(Suit.Club, Rank.Queen),
+                new Card(Suit.Spade, Rank.Ten),
+                new Card(Suit.Heart, Rank.Six),
+                new Card(Suit.Heart, Rank.Six),
+                new Card(Suit.Club, Rank.Three),
+                new Card(Suit.Club, Rank.Nine),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Heart, Rank.Ten),
+                new Card(Suit.Spade, Rank.King),
+                new Card(Suit.Club, Rank.Six),
+                new Card(Suit.Club, Rank.Jack),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Diamond, Rank.Jack),
+                new Card(Suit.Heart, Rank.King),
+                new Card(Suit.Club, Rank.Four),
+                new Card(Suit.Club, Rank.Five)
+            };
+
+            var lead = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Diamond, Rank.King)
+            };
+
+            var context = new RuleAIContextBuilder(config, AIDifficulty.Hard, null, new CardMemory(config)).BuildFollowContext(
+                hand,
+                lead,
+                lead,
+                AIRole.Opponent,
+                partnerWinning: false,
+                trickScore: 50,
+                playerIndex: 1,
+                dealerIndex: 0,
+                trickIndex: 2,
+                turnIndex: 8,
+                playPosition: 4,
+                currentWinningPlayer: 0);
+
+            var policy = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                new IntentResolver(config),
+                new ActionScorer(config),
+                new DecisionExplainer());
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal("MinimizeLoss", decision.Explanation.PrimaryIntent);
+            Assert.Contains(decision.SelectedCards, card => card.Suit == Suit.Diamond && card.Rank == Rank.Jack);
+            Assert.DoesNotContain(decision.SelectedCards, card => card.Suit == Suit.Heart && card.Rank == Rank.Ace);
+            Assert.DoesNotContain(decision.SelectedCards, card => card.Suit == Suit.Heart && card.Rank == Rank.Queen);
+        }
+
+        [Fact]
+        public void Decide_WhenPartnerWinningButHighScoreIsExposed_ReinforcesWithHighestWinningHeart()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Diamond };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Heart, Rank.Nine),
+                new Card(Suit.Spade, Rank.Five),
+                new Card(Suit.Diamond, Rank.Nine),
+                new Card(Suit.Spade, Rank.Jack),
+                new Card(Suit.Spade, Rank.Nine),
+                new Card(Suit.Spade, Rank.Six),
+                new Card(Suit.Heart, Rank.Queen),
+                new Card(Suit.Heart, Rank.Ace)
+            };
+            var context = new RuleAIContextBuilder(config, AIDifficulty.Hard, null, new CardMemory(config)).BuildFollowContext(
+                hand,
+                new List<Card> { new Card(Suit.Heart, Rank.Ten) },
+                new List<Card> { new Card(Suit.Heart, Rank.Ten) },
+                AIRole.Opponent,
+                partnerWinning: true,
+                trickScore: 10,
+                playerIndex: 1,
+                dealerIndex: 0,
+                trickIndex: 15,
+                turnIndex: 59,
+                playPosition: 3,
+                currentWinningPlayer: 3,
+                cardsLeftMin: 8);
+
+            var policy = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                new IntentResolver(config),
+                new ActionScorer(config),
+                new DecisionExplainer());
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal("TakeScore", decision.Explanation.PrimaryIntent);
+            Assert.Single(decision.SelectedCards);
+            Assert.Equal(Suit.Heart, decision.SelectedCards[0].Suit);
+            Assert.Equal(Rank.Ace, decision.SelectedCards[0].Rank);
+        }
     }
 }

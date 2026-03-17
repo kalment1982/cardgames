@@ -525,7 +525,7 @@ namespace TractorGame.Core.GameFlow
             }
 
             // 下一个玩家
-            _state.CurrentPlayer = (playerIndex + 1) % 4;
+            _state.CurrentPlayer = GetNextPlayerClockwise(playerIndex);
 
             LogEvent(
                 LogCategories.Audit,
@@ -841,6 +841,18 @@ namespace TractorGame.Core.GameFlow
                 metrics.Count == 0 ? null : metrics);
 
             return OperationResult.Fail(reasonCode);
+        }
+
+        private static int GetNextPlayerClockwise(int playerIndex)
+        {
+            return playerIndex switch
+            {
+                0 => 3,
+                3 => 2,
+                2 => 1,
+                1 => 0,
+                _ => ((playerIndex % 4) + 4) % 4
+            };
         }
 
         private void LogPhaseTransition(GamePhase from, GamePhase to)

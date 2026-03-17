@@ -24,7 +24,7 @@ public sealed class GameSessionService
     public void UpdateViewModel(Game game, GamePageViewModel vm)
     {
         vm.PlayerHand = new List<Card>(game.State.PlayerHands[0]);
-        SortHand(vm.PlayerHand, BuildCurrentConfig(game));
+        SortHand(vm.PlayerHand, BuildDisplayConfig(game));
         vm.DefenderScore = game.State.DefenderScore;
 
         if (game.State.TrumpSuit.HasValue)
@@ -59,6 +59,17 @@ public sealed class GameSessionService
         {
             LevelRank = game.State.LevelRank,
             TrumpSuit = game.State.TrumpSuit
+        };
+    }
+
+    private static GameConfig BuildDisplayConfig(Game game)
+    {
+        return new GameConfig
+        {
+            LevelRank = game.State.LevelRank,
+            // 发牌/竞叫阶段尚未定主时，使用当前亮主花色排序手牌，
+            // 这样亮主后主牌会立即移动到最左侧显示。
+            TrumpSuit = game.State.TrumpSuit ?? game.CurrentBidSuit
         };
     }
 

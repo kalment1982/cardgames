@@ -18,7 +18,7 @@ namespace TractorGame.Tests
                 TrumpSuit = Suit.Club
             };
 
-            var game = new Game(config);
+            var game = new Game();
             game.State.Phase = GamePhase.Playing;
             game.State.CurrentPlayer = 2;
             game.State.DealerIndex = 1;

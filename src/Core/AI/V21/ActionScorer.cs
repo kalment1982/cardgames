@@ -104,6 +104,7 @@ namespace TractorGame.Core.AI.V21
                     candidate.Count == 1 ? RuleAIUtility.GetCardValue(candidate[0], _config) / 180.0 :
                     candidate.Count * 0.4,
                 ["TrickScoreSwing"] = candidate.Sum(card => card.Score) / 10.0,
+                ["ContestBottomValue"] = ResolveContestBottomValue(context, candidate),
                 ["BottomSafetyValue"] = context.IsDealerSide ? RemainingControlValue(remaining) / 8.0 : 0,
                 ["LeadControlValue"] = pattern.Type == PatternType.Tractor ? 6.0 :
                     pattern.Type == PatternType.Pair ? 2.8 :
@@ -137,7 +138,9 @@ namespace TractorGame.Core.AI.V21
                 ["TrickWinValue"] = canBeat ? 2.5 : 0,
                 ["TrickScoreSwing"] = canBeat ? currentTrickScore + sentPoints : 0,
                 ["WinSecurityValue"] = canBeat ? threatAssessment.WinSecurityValue : 0,
+                ["WinMarginValue"] = canBeat ? threatAssessment.WinMargin : 0,
                 ["PointProtectionValue"] = canBeat ? threatAssessment.PointProtectionValue : 0,
+                ["ContestBottomValue"] = canBeat ? ResolveContestBottomValue(context, candidate) : 0,
                 ["BottomSafetyValue"] = context.IsDealerSide ? RemainingControlValue(remaining) / 8.0 : 0,
                 ["LeadControlValue"] = canBeat ? 1.5 : 0,
                 ["HandShapeValue"] = EvaluateCreateVoidValue(context.MyHand, remaining),
@@ -149,6 +152,8 @@ namespace TractorGame.Core.AI.V21
                 ["InfoLeakCost"] = candidate.Count(_config.IsTrump) * 0.4 +
                     sentPoints * 0.2 +
                     candidate.Sum(card => RuleAIUtility.GetCardValue(card, _config)) / 500.0,
+                ["DiscardRankCost"] = candidate.Sum(card => _config.IsTrump(card) ? 0 : (int)card.Rank),
+                ["DiscardPointCost"] = candidate.Sum(card => card.Score) / 5.0,
                 ["FuturePointRisk"] = canBeat ? threatAssessment.FuturePointRisk : 0,
                 ["BehindOpponentThreat"] = canBeat ? threatAssessment.BehindOpponentThreat : 0,
                 ["RecutRiskCost"] = canBeat ? EstimateRecutRisk(context, candidate, currentWinning, comparer, threatAssessment) : 0,
@@ -251,6 +256,12 @@ namespace TractorGame.Core.AI.V21
                 score -= features.GetValueOrDefault("FuturePointRisk") * 0.90;
             }
 
+            if (context.DecisionFrame.BottomContestPressure >= RiskLevel.Medium &&
+                context.DecisionFrame.EndgameLevel != EndgameLevel.None)
+            {
+                score += features.GetValueOrDefault("ContestBottomValue") * 0.80;
+            }
+
             return score;
         }
 
@@ -277,6 +288,7 @@ namespace TractorGame.Core.AI.V21
                 DecisionIntentKind.PrepareEndgame =>
                     features.GetValueOrDefault("EndgameReserveValue") * 2.20 +
                     features.GetValueOrDefault("BottomSafetyValue") * 1.20 +
+                    features.GetValueOrDefault("ContestBottomValue") * 1.60 +
                     features.GetValueOrDefault("WinSecurityValue") * 0.90 -
                     features.GetValueOrDefault("FuturePointRisk") * 1.00,
                 DecisionIntentKind.TakeLead =>
@@ -307,8 +319,10 @@ namespace TractorGame.Core.AI.V21
                     -4.50,
                 DecisionIntentKind.MinimizeLoss =>
                     -features.GetValueOrDefault("TrumpConsumptionCost") * 1.60 -
-                    features.GetValueOrDefault("HighControlLossCost") * 1.50 -
-                    features.GetValueOrDefault("StructureBreakCost") * 1.10,
+                    features.GetValueOrDefault("HighControlLossCost") * 1.20 -
+                    features.GetValueOrDefault("StructureBreakCost") * 0.60 -
+                    features.GetValueOrDefault("DiscardRankCost") * 0.55 -
+                    features.GetValueOrDefault("DiscardPointCost") * 1.10,
                 _ => 0
             };
         }
@@ -445,10 +459,18 @@ namespace TractorGame.Core.AI.V21
             bool hasFloorCandidate = scored.Any(action =>
                 action.Features.GetValueOrDefault("TrickWinValue") > 0 &&
                 action.Features.GetValueOrDefault("WinSecurityValue") >= requiredSecurityFloor);
+            bool preferHigherMarginToProtectMate =
+                context.PartnerWinning &&
+                context.TrickScore >= 5 &&
+                _followThreatAnalyzer.CountOpponentsBehind(context) > 0 &&
+                !hasFloorCandidate;
 
             return scored
                 .OrderByDescending(action => action.Features.GetValueOrDefault("TrickWinValue") > 0 ? 1 : 0)
                 .ThenByDescending(action => ResolveSecurityBucket(action, hasFloorCandidate, requiredSecurityFloor))
+                .ThenByDescending(action => preferHigherMarginToProtectMate
+                    ? action.Features.GetValueOrDefault("WinMarginValue")
+                    : 0)
                 .ThenByDescending(action => action.Features.GetValueOrDefault("PointProtectionValue"))
                 .ThenBy(action => action.Features.GetValueOrDefault("FuturePointRisk"))
                 .ThenBy(action => ResolveControlSpendCost(action))
@@ -486,6 +508,37 @@ namespace TractorGame.Core.AI.V21
             return action.Features.GetValueOrDefault("TrumpConsumptionCost") * 1.4 +
                 action.Features.GetValueOrDefault("HighControlLossCost") * 1.2 +
                 action.Features.GetValueOrDefault("InfoLeakCost") * 0.6;
+        }
+
+        private double ResolveContestBottomValue(RuleAIContext context, List<Card> candidate)
+        {
+            if (context.DecisionFrame.BottomContestPressure < RiskLevel.Medium)
+                return 0;
+
+            if (context.DecisionFrame.EndgameLevel == EndgameLevel.None)
+                return 0;
+
+            if (candidate.Count == 0)
+                return 0;
+
+            int multiplier = ResolveBottomMultiplier(candidate);
+            return multiplier;
+        }
+
+        private int ResolveBottomMultiplier(List<Card> cards)
+        {
+            var pattern = new CardPattern(cards, _config);
+
+            if (pattern.Type == PatternType.Tractor)
+            {
+                int pairCount = cards.Count / 2;
+                return (int)System.Math.Pow(2, pairCount);
+            }
+
+            if (pattern.Type == PatternType.Pair)
+                return 4;
+
+            return 2;
         }
 
         private string ResolveSystemKey(List<Card> candidate)

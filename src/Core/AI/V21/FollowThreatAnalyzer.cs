@@ -275,10 +275,26 @@ namespace TractorGame.Core.AI.V21
 
             int remaining = Math.Max(0, 4 - context.DecisionFrame.PlayPosition);
             var players = new List<int>(remaining);
+            int current = context.PlayerIndex;
             for (int offset = 1; offset <= remaining; offset++)
-                players.Add((context.PlayerIndex + offset) % 4);
+            {
+                current = GetNextPlayerClockwise(current);
+                players.Add(current);
+            }
 
             return players;
+        }
+
+        private static int GetNextPlayerClockwise(int playerIndex)
+        {
+            return playerIndex switch
+            {
+                0 => 3,
+                3 => 2,
+                2 => 1,
+                1 => 0,
+                _ => ((playerIndex % 4) + 4) % 4
+            };
         }
 
         private static bool IsTeammate(int myPlayerIndex, int otherPlayerIndex)

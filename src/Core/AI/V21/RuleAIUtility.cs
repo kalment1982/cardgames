@@ -8,6 +8,9 @@ namespace TractorGame.Core.AI.V21
 {
     internal static class RuleAIUtility
     {
+        public const int TotalScorePoints = 200;
+        public const int TotalScoreCardCount = 24;
+
         public static int GetCardPoints(Card card)
         {
             return card.Score;

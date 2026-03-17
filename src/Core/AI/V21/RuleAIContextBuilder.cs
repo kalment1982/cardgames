@@ -88,6 +88,7 @@ namespace TractorGame.Core.AI.V21
             var bottomCards = CloneCards(visibleBottomCards);
             var scorePressure = _endgamePolicy.ResolveScorePressure(defenderScore);
             var bottomPoints = bottomCards.Sum(card => card.Score);
+            var (playedScoreTotal, remainingScoreTotal, remainingScoreCards) = ResolveScoreSnapshot();
             var frame = new DecisionFrame
             {
                 PhaseKind = PhaseKind.BuryBottom,
@@ -95,10 +96,20 @@ namespace TractorGame.Core.AI.V21
                 CardsLeftMin = cardsLeftMin,
                 DefenderScore = defenderScore,
                 BottomPoints = bottomPoints,
+                PlayedScoreTotal = playedScoreTotal,
+                RemainingScoreTotal = remainingScoreTotal,
+                RemainingScoreCards = remainingScoreCards,
                 ScorePressure = scorePressure,
                 EndgameLevel = _endgamePolicy.ResolveEndgameLevel(cardsLeftMin),
-                BottomRiskPressure = _endgamePolicy.ResolveBottomRisk(role, bottomPoints, cardsLeftMin, scorePressure),
-                DealerRetentionRisk = _endgamePolicy.ResolveDealerRetentionRisk(role, defenderScore, bottomPoints, cardsLeftMin)
+                BottomRiskPressure = _endgamePolicy.ResolveBottomRisk(role, bottomPoints, cardsLeftMin, scorePressure, defenderScore, remainingScoreTotal),
+                DealerRetentionRisk = _endgamePolicy.ResolveDealerRetentionRisk(role, defenderScore, bottomPoints, cardsLeftMin),
+                BottomContestPressure = _endgamePolicy.ResolveBottomContestPressure(
+                    role,
+                    defenderScore,
+                    remainingScoreTotal,
+                    bottomPoints,
+                    cardsLeftMin,
+                    remainingScoreCards)
             };
 
             return BuildContext(
@@ -135,6 +146,7 @@ namespace TractorGame.Core.AI.V21
                 bottomPoints = bottomCards.Sum(card => card.Score);
 
             var scorePressure = _endgamePolicy.ResolveScorePressure(defenderScore);
+            var (playedScoreTotal, remainingScoreTotal, remainingScoreCards) = ResolveScoreSnapshot();
             var frame = new DecisionFrame
             {
                 PhaseKind = PhaseKind.Lead,
@@ -146,10 +158,20 @@ namespace TractorGame.Core.AI.V21
                 CurrentTrickScore = currentTrickScore,
                 DefenderScore = defenderScore,
                 BottomPoints = bottomPoints,
+                PlayedScoreTotal = playedScoreTotal,
+                RemainingScoreTotal = remainingScoreTotal,
+                RemainingScoreCards = remainingScoreCards,
                 ScorePressure = scorePressure,
                 EndgameLevel = _endgamePolicy.ResolveEndgameLevel(cardsLeftMin),
-                BottomRiskPressure = _endgamePolicy.ResolveBottomRisk(role, bottomPoints, cardsLeftMin, scorePressure),
-                DealerRetentionRisk = _endgamePolicy.ResolveDealerRetentionRisk(role, defenderScore, bottomPoints, cardsLeftMin)
+                BottomRiskPressure = _endgamePolicy.ResolveBottomRisk(role, bottomPoints, cardsLeftMin, scorePressure, defenderScore, remainingScoreTotal),
+                DealerRetentionRisk = _endgamePolicy.ResolveDealerRetentionRisk(role, defenderScore, bottomPoints, cardsLeftMin),
+                BottomContestPressure = _endgamePolicy.ResolveBottomContestPressure(
+                    role,
+                    defenderScore,
+                    remainingScoreTotal,
+                    bottomPoints,
+                    cardsLeftMin,
+                    remainingScoreCards)
             };
 
             return BuildContext(
@@ -193,6 +215,7 @@ namespace TractorGame.Core.AI.V21
                 bottomPoints = bottomCards.Sum(card => card.Score);
 
             var scorePressure = _endgamePolicy.ResolveScorePressure(defenderScore);
+            var (playedScoreTotal, remainingScoreTotal, remainingScoreCards) = ResolveScoreSnapshot();
             var frame = new DecisionFrame
             {
                 PhaseKind = PhaseKind.Follow,
@@ -207,10 +230,20 @@ namespace TractorGame.Core.AI.V21
                 CurrentTrickScore = trickScore,
                 DefenderScore = defenderScore,
                 BottomPoints = bottomPoints,
+                PlayedScoreTotal = playedScoreTotal,
+                RemainingScoreTotal = remainingScoreTotal,
+                RemainingScoreCards = remainingScoreCards,
                 ScorePressure = scorePressure,
                 EndgameLevel = _endgamePolicy.ResolveEndgameLevel(cardsLeftMin),
-                BottomRiskPressure = _endgamePolicy.ResolveBottomRisk(role, bottomPoints, cardsLeftMin, scorePressure),
-                DealerRetentionRisk = _endgamePolicy.ResolveDealerRetentionRisk(role, defenderScore, bottomPoints, cardsLeftMin)
+                BottomRiskPressure = _endgamePolicy.ResolveBottomRisk(role, bottomPoints, cardsLeftMin, scorePressure, defenderScore, remainingScoreTotal),
+                DealerRetentionRisk = _endgamePolicy.ResolveDealerRetentionRisk(role, defenderScore, bottomPoints, cardsLeftMin),
+                BottomContestPressure = _endgamePolicy.ResolveBottomContestPressure(
+                    role,
+                    defenderScore,
+                    remainingScoreTotal,
+                    bottomPoints,
+                    cardsLeftMin,
+                    remainingScoreCards)
             };
 
             return BuildContext(
@@ -286,6 +319,15 @@ namespace TractorGame.Core.AI.V21
             return candidates == null
                 ? new List<List<Card>>()
                 : candidates.Select(CloneCards).ToList();
+        }
+
+        private (int playedScoreTotal, int remainingScoreTotal, int remainingScoreCards) ResolveScoreSnapshot()
+        {
+            int playedScoreTotal = _memory?.GetPlayedScoreTotal() ?? 0;
+            int playedScoreCards = _memory?.GetPlayedScoreCardCount() ?? 0;
+            int remainingScoreTotal = System.Math.Max(0, RuleAIUtility.TotalScorePoints - playedScoreTotal);
+            int remainingScoreCards = System.Math.Max(0, RuleAIUtility.TotalScoreCardCount - playedScoreCards);
+            return (playedScoreTotal, remainingScoreTotal, remainingScoreCards);
         }
     }
 }

@@ -10,10 +10,6 @@
     font-family: 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
 }
 
-:root {
-    --corner-zoom-scale: 1.75;
-}
-
 /* 左上角信息栏 */
 .info-panel {
     position: absolute;
@@ -80,8 +76,59 @@
     font-size: 16px;
 }
 
+.trump-suit {
+    display: inline-block;
+    min-width: 22px;
+    text-align: center;
+    font-size: 20px;
+    line-height: 1;
+}
+
+.trump-red {
+    color: #ff6b6b;
+    text-shadow: 0 0 8px rgba(255, 107, 107, 0.2);
+}
+
+.trump-black {
+    color: #f7f7f7;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.18);
+}
+
+.trump-neutral {
+    color: #f4d35e;
+}
+
+.trump-empty {
+    color: transparent;
+}
+
 .team-row {
+    display: grid;
+    grid-template-columns: 2.2em 1.8em 1.6em auto;
+    align-items: center;
+    column-gap: 8px;
     line-height: 30px;
+}
+
+.team-cell {
+    white-space: nowrap;
+}
+
+.team-name {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.team-level {
+    font-weight: 700;
+}
+
+.team-trump {
+    text-align: center;
+}
+
+.team-score-label,
+.team-score {
+    text-align: left;
 }
 
 .trick-uid-panel {
@@ -152,6 +199,7 @@
 }
 
 .player-avatar {
+    position: relative;
     background: rgba(0, 0, 0, 0.6);
     color: white;
     padding: 8px 16px;
@@ -171,6 +219,23 @@
 .player-avatar.last-bid {
     background: rgba(241, 196, 15, 0.35);
     border: 1px solid rgba(241, 196, 15, 0.9);
+}
+
+.dealer-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #f7d774, #d7a928);
+    color: #3a2500;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 22px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.32);
 }
 
 /* 出牌显示区 */
@@ -246,11 +311,6 @@
 .played-card-shell {
     position: relative;
     flex: 0 0 auto;
-    --card-base-w: 70px;
-    --card-base-h: 105px;
-    --corner-crop-w: 28px;
-    --corner-crop-h: 44px;
-    --corner-zoom-scale-local: var(--corner-zoom-scale);
     overflow: hidden;
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -260,28 +320,16 @@
 
 /* 根据牌数量动态调整尺寸 */
 .played-card-shell.size-small {
-    --card-base-w: 45px;
-    --card-base-h: 67px;
-    --corner-crop-w: 21px;
-    --corner-crop-h: 30px;
     width: 45px;
     height: 67px;
 }
 
 .played-card-shell.size-medium {
-    --card-base-w: 55px;
-    --card-base-h: 82px;
-    --corner-crop-w: 24px;
-    --corner-crop-h: 36px;
     width: 55px;
     height: 82px;
 }
 
 .played-card-shell.size-large {
-    --card-base-w: 70px;
-    --card-base-h: 105px;
-    --corner-crop-w: 28px;
-    --corner-crop-h: 44px;
     width: 70px;
     height: 105px;
 }
@@ -291,7 +339,7 @@
     height: 100%;
     object-fit: fill;
     display: block;
-    opacity: 0.5;
+    opacity: 1;
 }
 
 /* 亮牌框 */
@@ -362,11 +410,6 @@
 .hand-card-shell {
     position: relative;
     flex: 0 0 auto;
-    --card-base-w: 60px;
-    --card-base-h: 90px;
-    --corner-crop-w: 27px;
-    --corner-crop-h: 41px;
-    --corner-zoom-scale-local: 2.1;
     width: 60px;
     height: 90px;
     border-radius: 4px;
@@ -381,31 +424,15 @@
     height: 100%;
     object-fit: fill;
     display: block;
-    opacity: 0.2;
+    opacity: 1;
 }
 
 .card-corner-zoom {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: var(--corner-crop-w);
-    height: var(--corner-crop-h);
-    overflow: hidden;
-    pointer-events: none;
-    z-index: 2;
-    border-bottom-right-radius: 6px;
+    display: none;
 }
 
 .card-corner-zoom-image {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: var(--card-base-w);
-    height: var(--card-base-h);
-    object-fit: fill;
-    transform: scale(var(--corner-zoom-scale-local, var(--corner-zoom-scale)));
-    transform-origin: top left;
-    display: block;
+    display: none;
 }
 
 .hand-card-back {
@@ -562,10 +589,6 @@
 /* 响应式设计 */
 @media (max-width: 1200px) {
     .hand-card-shell {
-        --card-base-w: 60px;
-        --card-base-h: 90px;
-        --corner-crop-w: 27px;
-        --corner-crop-h: 41px;
         width: 60px;
         height: 90px;
     }
@@ -576,28 +599,16 @@
     }
 
     .played-card-shell.size-large {
-        --card-base-w: 70px;
-        --card-base-h: 105px;
-        --corner-crop-w: 28px;
-        --corner-crop-h: 44px;
         width: 70px;
         height: 105px;
     }
 
     .played-card-shell.size-medium {
-        --card-base-w: 70px;
-        --card-base-h: 105px;
-        --corner-crop-w: 28px;
-        --corner-crop-h: 44px;
         width: 70px;
         height: 105px;
     }
 
     .played-card-shell.size-small {
-        --card-base-w: 70px;
-        --card-base-h: 105px;
-        --corner-crop-w: 28px;
-        --corner-crop-h: 44px;
         width: 70px;
         height: 105px;
     }

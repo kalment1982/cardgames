@@ -107,6 +107,31 @@ namespace TractorGame.Core.AI
             return totalCount - GetPlayedCount(card);
         }
 
+        public int GetPlayedScoreTotal()
+        {
+            int total = 0;
+            foreach (var entry in _playedCards)
+            {
+                var card = new Card(entry.Key.Item1, entry.Key.Item2);
+                total += card.Score * entry.Value;
+            }
+
+            return total;
+        }
+
+        public int GetPlayedScoreCardCount()
+        {
+            int total = 0;
+            foreach (var entry in _playedCards)
+            {
+                var card = new Card(entry.Key.Item1, entry.Key.Item2);
+                if (card.Score > 0)
+                    total += entry.Value;
+            }
+
+            return total;
+        }
+
         /// <summary>
         /// 判断某个玩家是否缺某个花色
         /// </summary>

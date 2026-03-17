@@ -30,10 +30,19 @@ namespace TractorGame.Core.AI.V21
             return EndgameLevel.None;
         }
 
-        public RiskLevel ResolveBottomRisk(AIRole role, int bottomPoints, int cardsLeftMin, ScorePressureLevel scorePressure)
+        public RiskLevel ResolveBottomRisk(
+            AIRole role,
+            int bottomPoints,
+            int cardsLeftMin,
+            ScorePressureLevel scorePressure,
+            int defenderScore,
+            int remainingScoreTotal)
         {
             if (role != AIRole.Dealer && role != AIRole.DealerPartner)
                 return RiskLevel.None;
+
+            if (cardsLeftMin > 0 && cardsLeftMin <= 5 && remainingScoreTotal > 0 && defenderScore + remainingScoreTotal >= 80)
+                return RiskLevel.High;
 
             if (bottomPoints >= 20 && cardsLeftMin > 0 && cardsLeftMin <= 5)
                 return RiskLevel.High;
@@ -59,6 +68,42 @@ namespace TractorGame.Core.AI.V21
                 return RiskLevel.Medium;
 
             if (defenderScore >= 40 && bottomPoints > 0)
+                return RiskLevel.Low;
+
+            return RiskLevel.None;
+        }
+
+        public RiskLevel ResolveBottomContestPressure(
+            AIRole role,
+            int defenderScore,
+            int remainingScoreTotal,
+            int bottomPoints,
+            int cardsLeftMin,
+            int remainingScoreCards)
+        {
+            if (role != AIRole.Opponent)
+                return RiskLevel.None;
+
+            if (cardsLeftMin <= 0 || remainingScoreTotal <= 0)
+                return RiskLevel.None;
+
+            if (remainingScoreCards <= 0)
+                return RiskLevel.None;
+
+            int estimatedBottom = bottomPoints > 0
+                ? bottomPoints
+                : System.Math.Min(remainingScoreTotal, 20);
+
+            bool canWinNoBottom = defenderScore + remainingScoreTotal >= 80;
+            bool canWinWithDouble = defenderScore + remainingScoreTotal + estimatedBottom >= 80;
+
+            if (cardsLeftMin <= 5 && !canWinNoBottom && canWinWithDouble)
+                return RiskLevel.High;
+
+            if (cardsLeftMin <= 5 && canWinNoBottom)
+                return RiskLevel.Medium;
+
+            if (cardsLeftMin <= 8 && defenderScore >= 60 && remainingScoreTotal >= 10)
                 return RiskLevel.Low;
 
             return RiskLevel.None;

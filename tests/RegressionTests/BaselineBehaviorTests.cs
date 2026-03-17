@@ -221,6 +221,11 @@ namespace TractorGame.Tests.RegressionTests
             Assert.Equal("round_test", decisionLog.RoundId);
             Assert.Equal("player_2", decisionLog.Actor);
             Assert.Equal(2, (int)decisionLog.Payload["player_index"]!);
+            Assert.True(decisionLog.Payload.ContainsKey("has_winning_candidate"));
+            Assert.True(decisionLog.Payload.ContainsKey("winning_candidate_count"));
+            Assert.True(decisionLog.Payload.ContainsKey("has_secure_winning_candidate"));
+            Assert.True(decisionLog.Payload.ContainsKey("secure_winning_candidate_count"));
+            Assert.True(decisionLog.Payload.ContainsKey("max_candidate_win_security"));
         }
 
         private static string Signature(List<Card> cards)
