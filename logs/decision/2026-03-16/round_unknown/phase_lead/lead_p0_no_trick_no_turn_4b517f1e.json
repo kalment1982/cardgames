@@ -1,0 +1,457 @@
+﻿{
+  "schema_version": "1.3",
+  "ts_utc": "2026-03-16T00:29:50.538565Z",
+  "level": "INFO",
+  "category": "diag",
+  "event": "ai.bundle",
+  "session_id": null,
+  "game_id": null,
+  "round_id": null,
+  "trick_id": null,
+  "turn_id": null,
+  "seq": 129,
+  "phase": "Lead",
+  "actor": "rule_ai",
+  "correlation_id": "lead_p0_no_trick_no_turn_4b517f1e",
+  "causation_id": null,
+  "payload": {
+    "decision_trace_id": "lead_p0_no_trick_no_turn_4b517f1e",
+    "bundle_version": "1.0",
+    "phase": "Lead",
+    "path": "rule_ai_v21_lead_policy2",
+    "player_index": 0,
+    "bundle": {
+      "meta": {
+        "decision_trace_id": "lead_p0_no_trick_no_turn_4b517f1e",
+        "phase": "Lead",
+        "path": "rule_ai_v21_lead_policy2",
+        "difficulty": "Expert",
+        "player_index": 0,
+        "role": "Opponent",
+        "session_id": null,
+        "game_id": null,
+        "round_id": null,
+        "trick_id": null,
+        "turn_id": null
+      },
+      "context_snapshot": {
+        "trick_index": 0,
+        "turn_index": 0,
+        "play_position": 1,
+        "dealer_index": -1,
+        "current_winning_player": -1,
+        "partner_winning": false,
+        "trick_score": 0,
+        "cards_left_min": 4,
+        "my_hand": [
+          {
+            "suit": "Spade",
+            "rank": "Queen",
+            "score": 0,
+            "text": "\u2660Q"
+          },
+          {
+            "suit": "Spade",
+            "rank": "Jack",
+            "score": 0,
+            "text": "\u2660J"
+          },
+          {
+            "suit": "Spade",
+            "rank": "Ten",
+            "score": 10,
+            "text": "\u266010"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Six",
+            "score": 0,
+            "text": "\u26666"
+          }
+        ],
+        "lead_cards": [],
+        "current_winning_cards": [],
+        "visible_bottom_cards": [],
+        "game_config": {
+          "trump_suit": "Heart",
+          "level_rank": "Five",
+          "throw_fail_penalty": 0,
+          "enable_counter_bottom": false,
+          "strict_follow_structure": true,
+          "strict_cut_structure": true
+        },
+        "hand_profile": {
+          "trump_count": 0,
+          "high_trump_count": 0,
+          "joker_count": 0,
+          "level_card_count": 0,
+          "trump_pair_count": 0,
+          "trump_tractor_count": 0,
+          "suit_lengths": {
+            "Spade": 3,
+            "Diamond": 1
+          },
+          "strongest_suit": "Spade",
+          "weakest_suit": "Diamond",
+          "potential_void_targets": [
+            "Diamond",
+            "Spade"
+          ],
+          "score_card_count": 1,
+          "structure_summary": "trump=0,pairs=0,tractors=0"
+        },
+        "memory_snapshot": {
+          "played_count_by_card": {
+            "\u2660A": 1,
+            "\u2660K": 1
+          },
+          "void_suits_by_player": {},
+          "no_pair_evidence": {},
+          "no_tractor_evidence": {},
+          "known_bottom_cards": []
+        },
+        "inference_snapshot": {
+          "estimated_trump_count_by_player": {
+            "1": {
+              "estimate": 12,
+              "lower": 0,
+              "upper": 30,
+              "confidence": 0.45
+            },
+            "2": {
+              "estimate": 12,
+              "lower": 0,
+              "upper": 30,
+              "confidence": 0.45
+            },
+            "3": {
+              "estimate": 12,
+              "lower": 0,
+              "upper": 30,
+              "confidence": 0.45
+            }
+          },
+          "high_trump_risk_by_player": {
+            "1": {
+              "level": "High",
+              "confidence": 0.5
+            },
+            "2": {
+              "level": "High",
+              "confidence": 0.5
+            },
+            "3": {
+              "level": "High",
+              "confidence": 0.5
+            }
+          },
+          "pair_potential_by_system": {
+            "Suit:Spade": {
+              "probability": 0.7,
+              "confidence": 0.55
+            },
+            "Suit:Heart": {
+              "probability": 0.7,
+              "confidence": 0.55
+            },
+            "Suit:Club": {
+              "probability": 0.7,
+              "confidence": 0.55
+            },
+            "Suit:Diamond": {
+              "probability": 0.7,
+              "confidence": 0.55
+            },
+            "Trump": {
+              "probability": 0.65,
+              "confidence": 0.55
+            }
+          },
+          "tractor_potential_by_system": {
+            "Suit:Spade": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Suit:Heart": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Suit:Club": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Suit:Diamond": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Trump": {
+              "probability": 0.45,
+              "confidence": 0.45
+            }
+          },
+          "throw_safety_estimate": {
+            "level": "Unknown",
+            "success_probability": 0.5,
+            "is_deterministically_safe": false
+          },
+          "lead_cut_risk_by_system": {
+            "Suit:Spade": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Suit:Heart": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Suit:Club": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Suit:Diamond": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Trump": {
+              "level": "Medium",
+              "confidence": 0.55
+            }
+          },
+          "mate_hold_confidence": {
+            "probability": 0.7,
+            "confidence": 0.65
+          },
+          "endgame_bottom_threat": {
+            "level": "Low",
+            "confidence": 0.85
+          }
+        },
+        "decision_frame": {
+          "phase_kind": "Lead",
+          "trick_index": 0,
+          "turn_index": 0,
+          "play_position": 1,
+          "cards_left_min": 4,
+          "current_winning_player": -1,
+          "partner_winning": false,
+          "lead_cards": [],
+          "current_winning_cards": [],
+          "current_trick_score": 0,
+          "defender_score": 0,
+          "bottom_points": 0,
+          "bottom_risk_pressure": "None",
+          "dealer_retention_risk": "None",
+          "score_pressure": "Relaxed",
+          "endgame_level": "FinalThree"
+        }
+      },
+      "intent_snapshot": {
+        "primary_intent": "ProbeWeakSuit",
+        "secondary_intent": "ShapeHand",
+        "selected_reason": "lead_best_control",
+        "phase_policy": "LeadPolicy2",
+        "hard_rule_rejects": [],
+        "risk_flags": [
+          "endgame_FinalThree"
+        ],
+        "tags": [
+          "LeadPolicy2",
+          "ProbeWeakSuit"
+        ]
+      },
+      "candidate_details": [
+        {
+          "candidate_index": 0,
+          "cards": [
+            {
+              "suit": "Spade",
+              "rank": "Ten",
+              "score": 10,
+              "text": "\u266010"
+            }
+          ],
+          "score": 8.9266,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.6111111111111112,
+            "TrickScoreSwing": 1,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 3
+          },
+          "is_selected": true
+        },
+        {
+          "candidate_index": 1,
+          "cards": [
+            {
+              "suit": "Spade",
+              "rank": "Jack",
+              "score": 0,
+              "text": "\u2660J"
+            }
+          ],
+          "score": 8.0192,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.6166666666666667,
+            "TrickScoreSwing": 0,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 3.15
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 2,
+          "cards": [
+            {
+              "suit": "Spade",
+              "rank": "Queen",
+              "score": 0,
+              "text": "\u2660Q"
+            }
+          ],
+          "score": 7.9981,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.6222222222222222,
+            "TrickScoreSwing": 0,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 3.15
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 3,
+          "cards": [
+            {
+              "suit": "Diamond",
+              "rank": "Six",
+              "score": 0,
+              "text": "\u26666"
+            }
+          ],
+          "score": 7.9929,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.5888888888888889,
+            "TrickScoreSwing": 0,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 3.15
+          },
+          "is_selected": false
+        }
+      ],
+      "selected_action": {
+        "cards": [
+          {
+            "suit": "Spade",
+            "rank": "Ten",
+            "score": 10,
+            "text": "\u266010"
+          }
+        ],
+        "score": 8.9266,
+        "reason_code": "lead_best_control",
+        "features": {
+          "TrickWinValue": 0.6111111111111112,
+          "TrickScoreSwing": 1,
+          "BottomSafetyValue": 0,
+          "LeadControlValue": 1,
+          "HandShapeValue": 0,
+          "MateSyncValue": 0,
+          "TrumpConsumptionCost": 0,
+          "HighControlLossCost": 0,
+          "StructureBreakCost": 0,
+          "InfoLeakCost": 0,
+          "RecutRiskCost": 0.4,
+          "EndgameReserveValue": 3
+        }
+      },
+      "compare_snapshot": {
+        "shadow_compared": true,
+        "divergence": true,
+        "old_path": "legacy",
+        "new_path": "rule_ai_v21_lead_policy2",
+        "old_action": [
+          {
+            "suit": "Spade",
+            "rank": "Queen",
+            "score": 0,
+            "text": "\u2660Q"
+          }
+        ],
+        "new_action": [
+          {
+            "suit": "Spade",
+            "rank": "Ten",
+            "score": 10,
+            "text": "\u266010"
+          }
+        ],
+        "old_reason": "lead_best_single",
+        "new_reason": "lead_best_control",
+        "old_intent": "TakeLead",
+        "new_intent": "ProbeWeakSuit"
+      },
+      "perf_snapshot": {
+        "total_ms": 0.5574,
+        "context_ms": 0.0384,
+        "legacy_ms": 0.1045,
+        "shadow_ms": 0.4143,
+        "candidate_count": 4,
+        "selected_score": 8.9266
+      },
+      "truth_snapshot": {
+        "enabled": false
+      },
+      "algorithm_trace": {
+        "policy_module": "LeadPolicy2",
+        "path": "rule_ai_v21_lead_policy2",
+        "phase": "Lead",
+        "use_rule_ai_v21": true,
+        "shadow_compare_enabled": true,
+        "shadow_compared": true,
+        "shadow_sample_rate": 1,
+        "decision_trace_enabled": true,
+        "decision_trace_include_truth_snapshot": true,
+        "decision_trace_max_candidates": 0,
+        "candidate_count": 4
+      }
+    }
+  },
+  "metrics": {
+    "candidate_count": 4,
+    "selected_score": 8.9266
+  }
+}

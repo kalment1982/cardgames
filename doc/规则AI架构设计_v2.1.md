@@ -349,6 +349,21 @@ flowchart TD
 - 若庄家埋底分高，应提高“最后一墩不能失守”的权重
 - 若本局一旦被抠底可能掉庄，`ProtectBottom` 可临时提升为残局超级意图
 
+末墩抠底/保底判定（新增）：
+- 先计算已出的所有分数牌：若 `RemainingScoreTotal == 0`，判定“分数已出完”，末墩不再为抠底强行消耗资源
+- 闲家抠底意图触发：
+  - `DefenderScore + RemainingScoreTotal >= 80`，说明“剩余分 + 已得分足够赢”，进入抠底争夺
+  - 若 `DefenderScore + RemainingScoreTotal < 80` 但 `DefenderScore + RemainingScoreTotal + BottomPoints(估算或可见) >= 80`，
+    说明“需要双扣/多倍扣底才能赢”，提升为强制抠底
+- 抠底出牌优先级（在“可赢/可压”的候选中排序）：
+  - 拖拉机 > 多对子 > 单对子 > 单牌
+- 庄家保底意图触发：
+  - 底牌可见时（庄家视角），若“已得分 + 底分被扣后可能掉庄”，提升 `ProtectBottom`
+  - 若 `DefenderScore + RemainingScoreTotal >= 80`，说明闲家有潜在胜线，应提前转入保底
+- 庄家队友协同：
+  - 通过庄家在末段出牌中的 `ProtectBottom / PrepareEndgame` 意图识别保底倾向
+  - 若庄家保底意图成立，队友在末段优先协助防守底分，而非抢小分
+
 约束：
 - `PrepareEndgame` 在后期具有高优先级，但不能绕过合法性校验
 - 后期模式不等于“任何墩都激进”，而是更重视最后一墩与底分风险
@@ -447,8 +462,12 @@ flowchart TD
 - `CurrentTrickScore`
 - `DefenderScore`
 - `BottomPoints`
+- `PlayedScoreTotal`
+- `RemainingScoreTotal`
+- `RemainingScoreCards`
 - `BottomRiskPressure`
 - `DealerRetentionRisk`
+- `BottomContestPressure`
 - `ScorePressure`
 - `EndgameLevel`
 
