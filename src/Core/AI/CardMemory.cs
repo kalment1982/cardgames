@@ -40,6 +40,7 @@ namespace TractorGame.Core.AI
             var leadCards = plays[0].Cards;
             var leadCategory = _config.GetCardCategory(leadCards[0]);
             var leadSuit = leadCards[0].Suit;
+            int requiredLeadCount = CountLeadSystemCards(leadCards, leadCategory, leadSuit);
 
             foreach (var play in plays)
             {
@@ -55,23 +56,17 @@ namespace TractorGame.Core.AI
                 // 记录缺门信息（跟牌者没有跟首引花色）
                 if (play.PlayerIndex != plays[0].PlayerIndex)
                 {
-                    bool hasLeadSuit = play.Cards.Any(c =>
-                    {
-                        if (leadCategory == CardCategory.Trump)
-                            return _config.IsTrump(c);
-                        else
-                            return !_config.IsTrump(c) && c.Suit == leadSuit;
-                    });
+                    int followedLeadCount = CountLeadSystemCards(play.Cards, leadCategory, leadSuit);
 
-                    if (!hasLeadSuit)
+                    // 只要该玩家在本墩需要跟首引体系 N 张，但实际只出了 k < N 张该体系牌，
+                    // 就说明他在出完这手之后已经断该体系，后续可安全记为缺门。
+                    if (followedLeadCount < requiredLeadCount)
                     {
-                        // 该玩家缺这个花色
                         if (!_playerVoidSuits.ContainsKey(play.PlayerIndex))
                             _playerVoidSuits[play.PlayerIndex] = new HashSet<Suit>();
 
                         if (leadCategory == CardCategory.Trump)
                         {
-                            // 缺主牌（用特殊标记）
                             _playerVoidSuits[play.PlayerIndex].Add(TrumpVoidMarker);
                         }
                         else
@@ -84,6 +79,17 @@ namespace TractorGame.Core.AI
 
             TrackNoPairEvidence(plays);
             TrackNoTractorEvidence(plays);
+        }
+
+        private int CountLeadSystemCards(List<Card> cards, CardCategory leadCategory, Suit leadSuit)
+        {
+            return cards.Count(card =>
+            {
+                if (leadCategory == CardCategory.Trump)
+                    return _config.IsTrump(card);
+
+                return !_config.IsTrump(card) && card.Suit == leadSuit;
+            });
         }
 
         /// <summary>
@@ -183,6 +189,45 @@ namespace TractorGame.Core.AI
             return _playerNoTractorSystems.ToDictionary(
                 entry => entry.Key,
                 entry => entry.Value.OrderBy(text => text).ToList());
+        }
+
+        public void SeedSnapshot(
+            IEnumerable<KeyValuePair<Card, int>>? playedCountByCard = null,
+            Dictionary<int, List<string>>? voidSuitsByPlayer = null,
+            Dictionary<int, List<string>>? noPairEvidence = null,
+            Dictionary<int, List<string>>? noTractorEvidence = null)
+        {
+            Reset();
+
+            if (playedCountByCard != null)
+            {
+                foreach (var entry in playedCountByCard)
+                    _playedCards[(entry.Key.Suit, entry.Key.Rank)] = Math.Max(0, entry.Value);
+            }
+
+            if (voidSuitsByPlayer != null)
+            {
+                foreach (var entry in voidSuitsByPlayer)
+                {
+                    if (!_playerVoidSuits.ContainsKey(entry.Key))
+                        _playerVoidSuits[entry.Key] = new HashSet<Suit>();
+
+                    foreach (var suitText in entry.Value)
+                    {
+                        if (string.Equals(suitText, "Trump", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _playerVoidSuits[entry.Key].Add(TrumpVoidMarker);
+                            continue;
+                        }
+
+                        if (Enum.TryParse<Suit>(suitText, ignoreCase: true, out var suit))
+                            _playerVoidSuits[entry.Key].Add(suit);
+                    }
+                }
+            }
+
+            SeedEvidenceMap(_playerNoPairSystems, noPairEvidence);
+            SeedEvidenceMap(_playerNoTractorSystems, noTractorEvidence);
         }
 
         public int GetPlayedTrumpCount()
@@ -760,6 +805,26 @@ namespace TractorGame.Core.AI
             if (value < 0) return 0;
             if (value > 1) return 1;
             return value;
+        }
+
+        private static void SeedEvidenceMap(
+            Dictionary<int, HashSet<string>> target,
+            Dictionary<int, List<string>>? source)
+        {
+            if (source == null)
+                return;
+
+            foreach (var entry in source)
+            {
+                if (!target.ContainsKey(entry.Key))
+                    target[entry.Key] = new HashSet<string>();
+
+                foreach (var item in entry.Value)
+                {
+                    if (!string.IsNullOrWhiteSpace(item))
+                        target[entry.Key].Add(item);
+                }
+            }
         }
 
         private sealed class ThrowSystem

@@ -61,6 +61,35 @@ namespace TractorGame.Tests.V21
             Assert.Contains(candidates, candidate => candidate.Count == 3 && candidate.All(card => card.Suit == Suit.Spade));
         }
 
+        [Fact]
+        public void Generate_LoggedLeadBundle_IncludesAcePlusPairPressureThrow()
+        {
+            var scenario = DecisionBundleScenarioFactory.FromBundleFile(
+                "tests/V21/Fixtures/decision_bundles/trick_0004_north_should_lead_spade_throw.json");
+            var memory = DecisionBundleScenarioFactory.BuildMemoryFromBundleFile(
+                "tests/V21/Fixtures/decision_bundles/trick_0004_north_should_lead_spade_throw.json",
+                scenario.Config);
+            var context = new RuleAIContextBuilder(scenario.Config, scenario.Difficulty, null, memory).BuildLeadContext(
+                scenario.Hand,
+                scenario.Role,
+                playerIndex: scenario.PlayerIndex,
+                dealerIndex: scenario.DealerIndex,
+                visibleBottomCards: scenario.VisibleBottomCards,
+                trickIndex: scenario.TrickIndex,
+                turnIndex: scenario.TurnIndex,
+                playPosition: scenario.PlayPosition,
+                cardsLeftMin: scenario.CardsLeftMin,
+                defenderScore: scenario.DefenderScore,
+                bottomPoints: scenario.BottomPoints);
+
+            var candidates = new LeadCandidateGenerator(scenario.Config, memory).Generate(context);
+
+            Assert.Contains(candidates, candidate =>
+                candidate.Count == 3 &&
+                candidate.Any(card => card.Suit == Suit.Spade && card.Rank == Rank.Ace) &&
+                candidate.Count(card => card.Suit == Suit.Spade && card.Rank == Rank.Six) == 2);
+        }
+
         private static void RecordPlayedCards(CardMemory memory, List<Card> cards)
         {
             for (int index = 0; index < cards.Count; index += 4)

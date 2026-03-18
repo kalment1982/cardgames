@@ -88,6 +88,42 @@ namespace TractorGame.Tests
         }
 
         [Fact]
+        public void TryBid_PairSmallJokers_SetsNoTrumpBid()
+        {
+            var bidding = new TrumpBidding();
+            var cards = new List<Card>
+            {
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.SmallJoker)
+            };
+
+            var result = bidding.TryBidEx(0, Rank.Seven, cards);
+
+            Assert.True(result.Success);
+            Assert.Equal(Suit.Joker, bidding.TrumpSuit);
+            Assert.Equal(0, bidding.TrumpPlayer);
+        }
+
+        [Fact]
+        public void CanBidEx_PairSmallJokers_CanOvertakePairLevelBid()
+        {
+            var bidding = new TrumpBidding();
+            Assert.True(bidding.TryBid(1, Rank.Seven, new List<Card>
+            {
+                new Card(Suit.Heart, Rank.Seven),
+                new Card(Suit.Heart, Rank.Seven)
+            }));
+
+            var result = bidding.CanBidEx(0, Rank.Seven, new List<Card>
+            {
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.SmallJoker)
+            });
+
+            Assert.True(result.Success);
+        }
+
+        [Fact]
         public void CanBidEx_DoesNotMutateState()
         {
             var bidding = new TrumpBidding();

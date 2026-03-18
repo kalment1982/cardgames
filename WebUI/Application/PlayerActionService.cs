@@ -42,6 +42,9 @@ public sealed class PlayerActionService
 
     public List<Card> GetBidLevelCards(Game game, GamePageViewModel vm, Suit suit)
     {
+        if (suit == Suit.Joker)
+            return vm.PlayerHand.Where(card => card.IsJoker).ToList();
+
         return vm.PlayerHand.Where(c => c.Rank == game.State.LevelRank && c.Suit == suit).ToList();
     }
 }

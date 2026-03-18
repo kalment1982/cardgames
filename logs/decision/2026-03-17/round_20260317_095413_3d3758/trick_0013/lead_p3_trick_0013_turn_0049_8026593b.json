@@ -1,0 +1,988 @@
+﻿{
+  "schema_version": "1.3",
+  "ts_utc": "2026-03-17T10:03:09.248Z",
+  "level": "INFO",
+  "category": "diag",
+  "event": "ai.bundle",
+  "session_id": "sess_20260317_095413_46da72",
+  "game_id": "game_20260317_095413_3d7b00",
+  "round_id": "round_20260317_095413_3d3758",
+  "trick_id": "trick_0013",
+  "turn_id": "turn_0049",
+  "seq": 265,
+  "phase": "Lead",
+  "actor": "player_3",
+  "correlation_id": "lead_p3_trick_0013_turn_0049_8026593b",
+  "causation_id": null,
+  "payload": {
+    "decision_trace_id": "lead_p3_trick_0013_turn_0049_8026593b",
+    "bundle_version": "1.0",
+    "phase": "Lead",
+    "path": "rule_ai_v21_lead_policy2",
+    "player_index": 3,
+    "bundle": {
+      "meta": {
+        "decision_trace_id": "lead_p3_trick_0013_turn_0049_8026593b",
+        "phase": "Lead",
+        "path": "rule_ai_v21_lead_policy2",
+        "difficulty": "Hard",
+        "player_index": 3,
+        "role": "DealerPartner",
+        "session_id": "sess_20260317_095413_46da72",
+        "game_id": "game_20260317_095413_3d7b00",
+        "round_id": "round_20260317_095413_3d3758",
+        "trick_id": "trick_0013",
+        "turn_id": "turn_0049"
+      },
+      "context_snapshot": {
+        "trick_index": 13,
+        "turn_index": 49,
+        "play_position": 1,
+        "dealer_index": 1,
+        "current_winning_player": -1,
+        "partner_winning": false,
+        "trick_score": 0,
+        "cards_left_min": 11,
+        "my_hand": [
+          {
+            "suit": "Spade",
+            "rank": "Two",
+            "score": 0,
+            "text": "\u26602"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Nine",
+            "score": 0,
+            "text": "\u26659"
+          },
+          {
+            "suit": "Heart",
+            "rank": "King",
+            "score": 10,
+            "text": "\u2665K"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Jack",
+            "score": 0,
+            "text": "\u2665J"
+          },
+          {
+            "suit": "Joker",
+            "rank": "BigJoker",
+            "score": 0,
+            "text": "\u5927\u738B"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26665"
+          },
+          {
+            "suit": "Joker",
+            "rank": "SmallJoker",
+            "score": 0,
+            "text": "\u5C0F\u738B"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Eight",
+            "score": 0,
+            "text": "\u26668"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26655"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Eight",
+            "score": 0,
+            "text": "\u26668"
+          },
+          {
+            "suit": "Spade",
+            "rank": "Queen",
+            "score": 0,
+            "text": "\u2660Q"
+          }
+        ],
+        "lead_cards": [],
+        "current_winning_cards": [],
+        "visible_bottom_cards": [],
+        "game_config": {
+          "trump_suit": "Diamond",
+          "level_rank": "Two",
+          "throw_fail_penalty": 0,
+          "enable_counter_bottom": false,
+          "strict_follow_structure": true,
+          "strict_cut_structure": true
+        },
+        "hand_profile": {
+          "trump_count": 6,
+          "high_trump_count": 3,
+          "joker_count": 2,
+          "level_card_count": 1,
+          "trump_pair_count": 1,
+          "trump_tractor_count": 0,
+          "suit_lengths": {
+            "Heart": 4,
+            "Spade": 1
+          },
+          "strongest_suit": "Heart",
+          "weakest_suit": "Spade",
+          "potential_void_targets": [
+            "Spade"
+          ],
+          "score_card_count": 3,
+          "structure_summary": "trump=6,pairs=1,tractors=0"
+        },
+        "memory_snapshot": {
+          "played_count_by_card": {
+            "\u2660A": 2,
+            "\u26604": 1,
+            "\u26605": 2,
+            "\u26607": 1,
+            "\u26663": 2,
+            "\u2666Q": 1,
+            "\u2666K": 1,
+            "\u2660J": 1,
+            "\u26608": 1,
+            "\u2663A": 2,
+            "\u2663Q": 2,
+            "\u266310": 2,
+            "\u26634": 2,
+            "\u26669": 1,
+            "\u266610": 2,
+            "\u26652": 1,
+            "\u5C0F\u738B": 1,
+            "\u26609": 2,
+            "\u26606": 2,
+            "\u266010": 1,
+            "\u2660K": 1,
+            "\u26603": 2,
+            "\u2665A": 2,
+            "\u26653": 1,
+            "\u26657": 2,
+            "\u26656": 2,
+            "\u26654": 1,
+            "\u26664": 1,
+            "\u2666A": 1,
+            "\u26632": 1,
+            "\u2663J": 2,
+            "\u2663K": 2,
+            "\u26633": 2,
+            "\u26635": 2,
+            "\u26636": 1,
+            "\u26637": 1,
+            "\u26639": 2
+          },
+          "void_suits_by_player": {},
+          "no_pair_evidence": {
+            "1": [
+              "Suit:Spade"
+            ],
+            "2": [
+              "Suit:Heart"
+            ],
+            "0": [
+              "Suit:Heart"
+            ]
+          },
+          "no_tractor_evidence": {},
+          "known_bottom_cards": []
+        },
+        "inference_snapshot": {
+          "estimated_trump_count_by_player": {
+            "0": {
+              "estimate": 6,
+              "lower": 0,
+              "upper": 15,
+              "confidence": 0.45
+            },
+            "1": {
+              "estimate": 6,
+              "lower": 0,
+              "upper": 15,
+              "confidence": 0.45
+            },
+            "2": {
+              "estimate": 6,
+              "lower": 0,
+              "upper": 15,
+              "confidence": 0.45
+            }
+          },
+          "high_trump_risk_by_player": {
+            "0": {
+              "level": "High",
+              "confidence": 0.5
+            },
+            "1": {
+              "level": "High",
+              "confidence": 0.5
+            },
+            "2": {
+              "level": "High",
+              "confidence": 0.5
+            }
+          },
+          "pair_potential_by_system": {
+            "Suit:Spade": {
+              "probability": 0.44999999999999996,
+              "confidence": 0.55
+            },
+            "Suit:Heart": {
+              "probability": 0.19999999999999996,
+              "confidence": 0.55
+            },
+            "Suit:Club": {
+              "probability": 0.7,
+              "confidence": 0.55
+            },
+            "Suit:Diamond": {
+              "probability": 0.7,
+              "confidence": 0.55
+            },
+            "Trump": {
+              "probability": 0.65,
+              "confidence": 0.55
+            }
+          },
+          "tractor_potential_by_system": {
+            "Suit:Spade": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Suit:Heart": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Suit:Club": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Suit:Diamond": {
+              "probability": 0.55,
+              "confidence": 0.45
+            },
+            "Trump": {
+              "probability": 0.45,
+              "confidence": 0.45
+            }
+          },
+          "throw_safety_estimate": {
+            "level": "Unknown",
+            "success_probability": 0.5,
+            "is_deterministically_safe": false
+          },
+          "lead_cut_risk_by_system": {
+            "Suit:Spade": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Suit:Heart": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Suit:Club": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Suit:Diamond": {
+              "level": "Low",
+              "confidence": 0.65
+            },
+            "Trump": {
+              "level": "Medium",
+              "confidence": 0.55
+            }
+          },
+          "mate_hold_confidence": {
+            "probability": 0.52,
+            "confidence": 0.65
+          },
+          "endgame_bottom_threat": {
+            "level": "Low",
+            "confidence": 0.85
+          }
+        },
+        "decision_frame": {
+          "phase_kind": "Lead",
+          "trick_index": 13,
+          "turn_index": 49,
+          "play_position": 1,
+          "cards_left_min": 11,
+          "current_winning_player": -1,
+          "partner_winning": false,
+          "lead_cards": [],
+          "current_winning_cards": [],
+          "current_trick_score": 0,
+          "defender_score": 55,
+          "bottom_points": 10,
+          "played_score_total": 110,
+          "remaining_score_total": 90,
+          "remaining_score_cards": 11,
+          "bottom_risk_pressure": "Low",
+          "dealer_retention_risk": "Medium",
+          "bottom_contest_pressure": "None",
+          "score_pressure": "Tight",
+          "endgame_level": "None"
+        }
+      },
+      "intent_snapshot": {
+        "primary_intent": "AttackLongSuit",
+        "secondary_intent": "TakeLead",
+        "selected_reason": "lead_best_control",
+        "phase_policy": "LeadPolicy2",
+        "hard_rule_rejects": [],
+        "risk_flags": [],
+        "tags": [
+          "LeadPolicy2",
+          "SideSuitPressure"
+        ]
+      },
+      "candidate_details": [
+        {
+          "candidate_index": 0,
+          "cards": [
+            {
+              "suit": "Diamond",
+              "rank": "Five",
+              "score": 5,
+              "text": "\u26665"
+            }
+          ],
+          "score": 24.3897,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 3.361111111111111,
+            "TrickScoreSwing": 0.5,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.7875,
+            "LeadControlValue": 1.6,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 1,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0.6,
+            "RecutRiskCost": 1,
+            "EndgameReserveValue": 14.3
+          },
+          "is_selected": true
+        },
+        {
+          "candidate_index": 1,
+          "cards": [
+            {
+              "suit": "Heart",
+              "rank": "King",
+              "score": 10,
+              "text": "\u2665K"
+            }
+          ],
+          "score": 23.2355,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.6277777777777778,
+            "TrickScoreSwing": 1,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.7875,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 14.3
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 2,
+          "cards": [
+            {
+              "suit": "Heart",
+              "rank": "Five",
+              "score": 5,
+              "text": "\u26655"
+            }
+          ],
+          "score": 22.459,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.5833333333333334,
+            "TrickScoreSwing": 0.5,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.7875,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 14.3
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 3,
+          "cards": [
+            {
+              "suit": "Heart",
+              "rank": "Nine",
+              "score": 0,
+              "text": "\u26659"
+            }
+          ],
+          "score": 21.8921,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.6055555555555555,
+            "TrickScoreSwing": 0,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.80625,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 14.45
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 4,
+          "cards": [
+            {
+              "suit": "Spade",
+              "rank": "Queen",
+              "score": 0,
+              "text": "\u2660Q"
+            }
+          ],
+          "score": 21.8879,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 0.6222222222222222,
+            "TrickScoreSwing": 0,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.80625,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0.4,
+            "EndgameReserveValue": 14.45
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 5,
+          "cards": [
+            {
+              "suit": "Joker",
+              "rank": "BigJoker",
+              "score": 0,
+              "text": "\u5927\u738B"
+            }
+          ],
+          "score": 21.7796,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 5.555555555555555,
+            "TrickScoreSwing": 0,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.55625,
+            "LeadControlValue": 1.6,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 1,
+            "HighControlLossCost": 1,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 1.1,
+            "RecutRiskCost": 1,
+            "EndgameReserveValue": 12.45
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 6,
+          "cards": [
+            {
+              "suit": "Diamond",
+              "rank": "Eight",
+              "score": 0,
+              "text": "\u26668"
+            },
+            {
+              "suit": "Diamond",
+              "rank": "Eight",
+              "score": 0,
+              "text": "\u26668"
+            }
+          ],
+          "score": 20.0818,
+          "reason_code": "lead_best_control",
+          "features": {
+            "TrickWinValue": 1.8,
+            "TrickScoreSwing": 0,
+            "ContestBottomValue": 0,
+            "BottomSafetyValue": 1.68125,
+            "LeadControlValue": 2.8,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 2,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 2,
+            "InfoLeakCost": 1.2,
+            "RecutRiskCost": 1,
+            "EndgameReserveValue": 13.45
+          },
+          "is_selected": false
+        }
+      ],
+      "selected_action": {
+        "cards": [
+          {
+            "suit": "Diamond",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26665"
+          }
+        ],
+        "score": 24.3897,
+        "reason_code": "lead_best_control",
+        "features": {
+          "TrickWinValue": 3.361111111111111,
+          "TrickScoreSwing": 0.5,
+          "ContestBottomValue": 0,
+          "BottomSafetyValue": 1.7875,
+          "LeadControlValue": 1.6,
+          "HandShapeValue": 0,
+          "MateSyncValue": 0,
+          "TrumpConsumptionCost": 1,
+          "HighControlLossCost": 0,
+          "StructureBreakCost": 0,
+          "InfoLeakCost": 0.6,
+          "RecutRiskCost": 1,
+          "EndgameReserveValue": 14.3
+        }
+      },
+      "compare_snapshot": {
+        "shadow_compared": true,
+        "divergence": true,
+        "old_path": "legacy",
+        "new_path": "rule_ai_v21_lead_policy2",
+        "old_action": [
+          {
+            "suit": "Diamond",
+            "rank": "Eight",
+            "score": 0,
+            "text": "\u26668"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Eight",
+            "score": 0,
+            "text": "\u26668"
+          }
+        ],
+        "new_action": [
+          {
+            "suit": "Diamond",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26665"
+          }
+        ],
+        "old_reason": "lead_best_pair",
+        "new_reason": "lead_best_control",
+        "old_intent": "PrepareThrow",
+        "new_intent": "AttackLongSuit"
+      },
+      "perf_snapshot": {
+        "total_ms": 14,
+        "context_ms": 1,
+        "legacy_ms": 4,
+        "shadow_ms": 9,
+        "candidate_count": 7,
+        "selected_score": 24.3897
+      },
+      "truth_snapshot": {
+        "enabled": true,
+        "current_player": 3,
+        "defender_score": 55,
+        "hands_by_player": [
+          {
+            "player_index": 0,
+            "cards": [
+              {
+                "suit": "Diamond",
+                "rank": "Six",
+                "score": 0,
+                "text": "\u26666"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Jack",
+                "score": 0,
+                "text": "\u2666J"
+              },
+              {
+                "suit": "Joker",
+                "rank": "BigJoker",
+                "score": 0,
+                "text": "\u5927\u738B"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Queen",
+                "score": 0,
+                "text": "\u2665Q"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Six",
+                "score": 0,
+                "text": "\u26666"
+              },
+              {
+                "suit": "Spade",
+                "rank": "Jack",
+                "score": 0,
+                "text": "\u2660J"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "King",
+                "score": 10,
+                "text": "\u2666K"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Nine",
+                "score": 0,
+                "text": "\u26669"
+              },
+              {
+                "suit": "Club",
+                "rank": "Two",
+                "score": 0,
+                "text": "\u26632"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Queen",
+                "score": 0,
+                "text": "\u2666Q"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Four",
+                "score": 0,
+                "text": "\u26664"
+              }
+            ]
+          },
+          {
+            "player_index": 1,
+            "cards": [
+              {
+                "suit": "Diamond",
+                "rank": "Five",
+                "score": 5,
+                "text": "\u26665"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Five",
+                "score": 5,
+                "text": "\u26655"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Jack",
+                "score": 0,
+                "text": "\u2665J"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Seven",
+                "score": 0,
+                "text": "\u26667"
+              },
+              {
+                "suit": "Spade",
+                "rank": "Queen",
+                "score": 0,
+                "text": "\u2660Q"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Eight",
+                "score": 0,
+                "text": "\u26658"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Ten",
+                "score": 10,
+                "text": "\u266510"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Queen",
+                "score": 0,
+                "text": "\u2665Q"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Eight",
+                "score": 0,
+                "text": "\u26658"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Seven",
+                "score": 0,
+                "text": "\u26667"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Ace",
+                "score": 0,
+                "text": "\u2666A"
+              }
+            ]
+          },
+          {
+            "player_index": 2,
+            "cards": [
+              {
+                "suit": "Diamond",
+                "rank": "Two",
+                "score": 0,
+                "text": "\u26662"
+              },
+              {
+                "suit": "Spade",
+                "rank": "King",
+                "score": 10,
+                "text": "\u2660K"
+              },
+              {
+                "suit": "Spade",
+                "rank": "Two",
+                "score": 0,
+                "text": "\u26602"
+              },
+              {
+                "suit": "Heart",
+                "rank": "King",
+                "score": 10,
+                "text": "\u2665K"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Ten",
+                "score": 10,
+                "text": "\u266510"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Two",
+                "score": 0,
+                "text": "\u26652"
+              },
+              {
+                "suit": "Club",
+                "rank": "Eight",
+                "score": 0,
+                "text": "\u26638"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Two",
+                "score": 0,
+                "text": "\u26662"
+              },
+              {
+                "suit": "Club",
+                "rank": "Eight",
+                "score": 0,
+                "text": "\u26638"
+              },
+              {
+                "suit": "Spade",
+                "rank": "Ten",
+                "score": 10,
+                "text": "\u266010"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Jack",
+                "score": 0,
+                "text": "\u2666J"
+              }
+            ]
+          },
+          {
+            "player_index": 3,
+            "cards": [
+              {
+                "suit": "Spade",
+                "rank": "Two",
+                "score": 0,
+                "text": "\u26602"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Nine",
+                "score": 0,
+                "text": "\u26659"
+              },
+              {
+                "suit": "Heart",
+                "rank": "King",
+                "score": 10,
+                "text": "\u2665K"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Jack",
+                "score": 0,
+                "text": "\u2665J"
+              },
+              {
+                "suit": "Joker",
+                "rank": "BigJoker",
+                "score": 0,
+                "text": "\u5927\u738B"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Five",
+                "score": 5,
+                "text": "\u26665"
+              },
+              {
+                "suit": "Joker",
+                "rank": "SmallJoker",
+                "score": 0,
+                "text": "\u5C0F\u738B"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Eight",
+                "score": 0,
+                "text": "\u26668"
+              },
+              {
+                "suit": "Heart",
+                "rank": "Five",
+                "score": 5,
+                "text": "\u26655"
+              },
+              {
+                "suit": "Diamond",
+                "rank": "Eight",
+                "score": 0,
+                "text": "\u26668"
+              },
+              {
+                "suit": "Spade",
+                "rank": "Queen",
+                "score": 0,
+                "text": "\u2660Q"
+              }
+            ]
+          }
+        ],
+        "current_trick": [],
+        "bottom_cards": [
+          {
+            "suit": "Spade",
+            "rank": "Seven",
+            "score": 0,
+            "text": "\u26607"
+          },
+          {
+            "suit": "Spade",
+            "rank": "King",
+            "score": 10,
+            "text": "\u2660K"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Eight",
+            "score": 0,
+            "text": "\u26658"
+          },
+          {
+            "suit": "Club",
+            "rank": "Queen",
+            "score": 0,
+            "text": "\u2663Q"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Seven",
+            "score": 0,
+            "text": "\u26667"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Nine",
+            "score": 0,
+            "text": "\u26659"
+          },
+          {
+            "suit": "Club",
+            "rank": "Seven",
+            "score": 0,
+            "text": "\u26637"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Ace",
+            "score": 0,
+            "text": "\u2666A"
+          }
+        ]
+      },
+      "algorithm_trace": {
+        "policy_module": "LeadPolicy2",
+        "path": "rule_ai_v21_lead_policy2",
+        "phase": "Lead",
+        "use_rule_ai_v21": true,
+        "shadow_compare_enabled": true,
+        "shadow_compared": true,
+        "shadow_sample_rate": 1,
+        "decision_trace_enabled": true,
+        "decision_trace_include_truth_snapshot": true,
+        "decision_trace_max_candidates": 0,
+        "candidate_count": 7
+      }
+    }
+  },
+  "metrics": {
+    "candidate_count": 7,
+    "selected_score": 24.3897
+  }
+}

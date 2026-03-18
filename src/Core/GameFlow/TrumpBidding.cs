@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using TractorGame.Core.Models;
 using TractorGame.Core.Logging;
 
@@ -12,7 +13,7 @@ namespace TractorGame.Core.GameFlow
     {
         private Suit? _trumpSuit;
         private int _trumpPlayer = -1;
-        private int _trumpLevel = 0; // 0=单张, 1=对子, 2=自保
+        private int _trumpLevel = 0; // 0=单张级牌, 1=对级牌, 2=对小王反无主/自保, 3=对大王反无主
 
         public Suit? TrumpSuit => _trumpSuit;
         public int TrumpPlayer => _trumpPlayer;
@@ -79,6 +80,22 @@ namespace TractorGame.Core.GameFlow
         {
             if (cards.Count == 0)
                 return (false, null, 0, ReasonCodes.BidNotLevelCard);
+
+            if (cards.All(card => card.IsJoker))
+            {
+                if (cards.Count != 2)
+                    return (false, null, 0, ReasonCodes.BidNotLevelCard);
+
+                if (cards[0].Rank != cards[1].Rank)
+                    return (false, null, 0, ReasonCodes.BidNotLevelCard);
+
+                return cards[0].Rank switch
+                {
+                    Rank.SmallJoker => (true, Suit.Joker, 2, null),
+                    Rank.BigJoker => (true, Suit.Joker, 3, null),
+                    _ => (false, null, 0, ReasonCodes.BidNotLevelCard)
+                };
+            }
 
             Suit? suit = null;
             foreach (var card in cards)

@@ -111,10 +111,21 @@ namespace TractorGame.Core.AI.V21
 
         private List<SuitCandidate> BuildCandidates(RuleAIContext context)
         {
-            return context.MyHand
+            var suitCandidates = context.MyHand
                 .Where(card => card.Rank == context.RuleProfile.LevelRank && card.Suit != Suit.Joker)
                 .GroupBy(card => card.Suit)
                 .Select(group => EvaluateSuit(context, group.Key, group.ToList()))
+                .ToList();
+
+            var jokerCandidates = context.MyHand
+                .Where(card => card.IsJoker)
+                .GroupBy(card => card.Rank)
+                .Where(group => group.Count() >= 2)
+                .Select(group => EvaluateNoTrump(context, group.Key, group.Take(2).ToList()))
+                .ToList();
+
+            return suitCandidates
+                .Concat(jokerCandidates)
                 .ToList();
         }
 
@@ -179,6 +190,66 @@ namespace TractorGame.Core.AI.V21
                 score);
         }
 
+        private SuitCandidate EvaluateNoTrump(RuleAIContext context, Rank jokerRank, List<Card> jokerCards)
+        {
+            var config = new GameConfig
+            {
+                LevelRank = context.RuleProfile.LevelRank,
+                TrumpSuit = null
+            };
+
+            var visible = context.MyHand;
+            var trumpCards = visible.Where(config.IsTrump).ToList();
+            int visibleCount = visible.Count;
+            int trumpCount = trumpCards.Count;
+            int pairUnits = trumpCards.GroupBy(card => card).Sum(group => group.Count() / 2);
+            bool hasTractor = HasTractor(config, trumpCards);
+
+            bool c1 = true;
+            bool c2 = trumpCount > visibleCount / 3.0;
+            bool c3 = jokerRank == Rank.BigJoker || trumpCount >= 4;
+
+            bool dealerSide = context.PlayerIndex >= 0 && context.DealerIndex >= 0
+                ? context.PlayerIndex % 2 == context.DealerIndex % 2
+                : context.Role != AIRole.Opponent;
+            bool hasBid = context.CurrentBidPlayer >= 0;
+            bool sameSideBid = hasBid && context.PlayerIndex >= 0 && context.CurrentBidPlayer % 2 == context.PlayerIndex % 2;
+            bool oppositeSideBid = hasBid && !sameSideBid;
+
+            double ratio = trumpCount / (double)Math.Max(1, visibleCount);
+            double score = 0;
+            score += 1.35;
+            score += jokerRank == Rank.BigJoker ? 0.55 : 0.25;
+            score += c2 ? 0.90 : 0.00;
+            score += c3 ? 0.45 : 0.00;
+            score += hasTractor ? 0.25 : 0.00;
+            score += Math.Min(0.60, pairUnits * 0.15);
+            score += ratio * 0.60;
+            score += dealerSide ? 0.10 : 0.04;
+            score += oppositeSideBid ? 0.35 : 0.00;
+            score -= sameSideBid ? 0.12 : 0.00;
+            score += ResolveStage(context.BidRoundIndex) switch
+            {
+                BidStage.Early => -0.15,
+                BidStage.Mid => 0.00,
+                _ => 0.15
+            };
+
+            int maxBidPriority = jokerRank == Rank.BigJoker ? 3 : 2;
+            return new SuitCandidate(
+                Suit.Joker,
+                jokerCards.OrderByDescending(card => card.Rank).ToList(),
+                maxBidPriority,
+                c1,
+                c2,
+                c3,
+                trumpCount,
+                pairUnits,
+                hasTractor,
+                context.BidRoundIndex,
+                score);
+        }
+
         private bool ShouldBidDeterministically(SuitCandidate candidate, RuleAIContext context)
         {
             bool hasCoreSignal = candidate.C1 || candidate.C2 || candidate.C3;
@@ -218,7 +289,16 @@ namespace TractorGame.Core.AI.V21
 
         private static List<Card> BuildAttempt(SuitCandidate candidate, int currentBidPriority)
         {
-            int targetCount = candidate.MaxBidPriority >= 1 && currentBidPriority < 1 ? 2 : 1;
+            int targetCount;
+            if (candidate.Suit == Suit.Joker)
+            {
+                targetCount = 2;
+            }
+            else
+            {
+                targetCount = candidate.MaxBidPriority >= 1 && currentBidPriority < 1 ? 2 : 1;
+            }
+
             if (candidate.LevelCards.Count < targetCount)
                 targetCount = candidate.LevelCards.Count;
             return targetCount <= 0 ? new List<Card>() : candidate.LevelCards.Take(targetCount).ToList();

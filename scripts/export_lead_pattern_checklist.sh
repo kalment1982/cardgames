@@ -107,19 +107,28 @@ foreach (var suite in suites)
         sb.AppendLine($"- 首发系统: `{systemKind}`");
         sb.AppendLine($"- 备注: `{note}`");
 
+        string PlayerName(int player) => player switch
+        {
+            0 => "南家",
+            1 => "东家",
+            2 => "北家",
+            3 => "西家",
+            _ => $"未知({player})"
+        };
+
         for (var player = 0; player < 4; player++)
         {
             var hand = (IEnumerable)hands.GetValue(player)!;
             var play = (IEnumerable)Get(plays.GetValue(player)!, "Cards")!;
-            sb.AppendLine($"- 玩家{player}手牌: `{JoinCards(hand)}`");
-            sb.AppendLine($"- 玩家{player}出牌: `{JoinCards(play)}`");
+            sb.AppendLine($"- {PlayerName(player)}手牌: `{JoinCards(hand)}`");
+            sb.AppendLine($"- {PlayerName(player)}出牌: `{JoinCards(play)}`");
         }
 
         var p1 = BoolAt(expectedFollowSuccess, 1) ? "OK" : $"FAIL/{StringAt(expectedFollowReason, 1)}";
         var p2 = BoolAt(expectedFollowSuccess, 2) ? "OK" : $"FAIL/{StringAt(expectedFollowReason, 2)}";
         var p3 = BoolAt(expectedFollowSuccess, 3) ? "OK" : $"FAIL/{StringAt(expectedFollowReason, 3)}";
         sb.AppendLine($"- 跟牌预期: `P1={p1}, P2={p2}, P3={p3}`");
-        sb.AppendLine(expectedWinner >= 0 ? $"- 赢家预期: `玩家{expectedWinner}`" : "- 赢家预期: `不校验`");
+        sb.AppendLine(expectedWinner >= 0 ? $"- 赢家预期: `{PlayerName(expectedWinner)}`" : "- 赢家预期: `不校验`");
         sb.AppendLine(expectedThrow is null
             ? "- 甩牌预期: `不校验`"
             : $"- 甩牌预期: `{BoolText((bool)expectedThrow)}`");

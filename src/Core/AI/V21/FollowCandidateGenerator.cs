@@ -335,6 +335,16 @@ namespace TractorGame.Core.AI.V21
             if (winningCombos.Count == 0)
                 return;
 
+            var threatAnalyzer = new FollowThreatAnalyzer(_config);
+            var securityRanked = winningCombos
+                .Select(candidate => new
+                {
+                    Candidate = candidate,
+                    Assessment = threatAnalyzer.Analyze(context, candidate, currentWinningCards)
+                })
+                .ToList();
+            int bestSecurity = securityRanked.Max(item => (int)item.Assessment.SecurityLevel);
+
             var representativeCombos = new List<List<Card>>
             {
                 winningCombos
@@ -351,6 +361,12 @@ namespace TractorGame.Core.AI.V21
                     .OrderBy(candidate => RuleAIUtility.EstimateStructureLoss(_config, context.MyHand, candidate, comparer))
                     .ThenBy(candidate => EvaluateWinningTrumpCutCost(context.MyHand, candidate, comparer))
                     .ThenBy(candidate => RuleAIUtility.BuildCandidateKey(candidate))
+                    .First(),
+                securityRanked
+                    .Where(item => (int)item.Assessment.SecurityLevel == bestSecurity)
+                    .OrderBy(item => EvaluateWinningTrumpCutCost(context.MyHand, item.Candidate, comparer))
+                    .ThenBy(item => RuleAIUtility.BuildCandidateKey(item.Candidate))
+                    .Select(item => item.Candidate)
                     .First(),
                 PickStrongestCandidate(winningCombos, comparer)
             };

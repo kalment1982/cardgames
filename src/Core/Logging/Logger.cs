@@ -749,7 +749,7 @@ namespace TractorGame.Core.Logging
         {
             if (!int.TryParse(playerIndex, out var p))
                 return "未知";
-            return $"玩家{p}（{SeatName(p)}）";
+            return $"{SeatName(p)}家";
         }
 
         private static string SeatName(int player) => player switch

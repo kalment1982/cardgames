@@ -74,6 +74,39 @@ namespace TractorGame.Tests.V21
             return scenario;
         }
 
+        public static CardMemory BuildMemoryFromBundleFile(string path, GameConfig? config = null)
+        {
+            var resolvedPath = ResolvePath(path);
+            using var doc = JsonDocument.Parse(File.ReadAllText(resolvedPath));
+            var root = doc.RootElement;
+            var payload = root.GetProperty("payload");
+            var bundle = payload.GetProperty("bundle");
+            var contextSnapshot = bundle.GetProperty("context_snapshot");
+            var configElement = contextSnapshot.GetProperty("game_config");
+            var effectiveConfig = config ?? new GameConfig
+            {
+                LevelRank = ParseEnum<Rank>(ReadString(configElement, "level_rank") ?? nameof(Rank.Two)),
+                TrumpSuit = ParseNullableEnum<Suit>(ReadString(configElement, "trump_suit")),
+                ThrowFailPenalty = ReadInt(configElement, "throw_fail_penalty"),
+                EnableCounterBottom = ReadBool(configElement, "enable_counter_bottom")
+            };
+
+            var memory = new CardMemory(effectiveConfig);
+            if (!contextSnapshot.TryGetProperty("memory_snapshot", out var memorySnapshot) ||
+                memorySnapshot.ValueKind == JsonValueKind.Undefined)
+            {
+                return memory;
+            }
+
+            memory.SeedSnapshot(
+                playedCountByCard: ReadPlayedCountSnapshot(memorySnapshot),
+                voidSuitsByPlayer: ReadStringListMap(memorySnapshot, "void_suits_by_player"),
+                noPairEvidence: ReadStringListMap(memorySnapshot, "no_pair_evidence"),
+                noTractorEvidence: ReadStringListMap(memorySnapshot, "no_tractor_evidence"));
+
+            return memory;
+        }
+
         private static string ResolvePath(string path)
         {
             if (Path.IsPathRooted(path) && File.Exists(path))
@@ -202,6 +235,118 @@ namespace TractorGame.Tests.V21
             var suit = ParseEnum<Suit>(ReadString(element, "suit") ?? nameof(Suit.Spade));
             var rank = ParseEnum<Rank>(ReadString(element, "rank") ?? nameof(Rank.Two));
             return new Card(suit, rank);
+        }
+
+        private static List<KeyValuePair<Card, int>> ReadPlayedCountSnapshot(JsonElement element)
+        {
+            if (!element.TryGetProperty("played_count_by_card", out var property) ||
+                property.ValueKind != JsonValueKind.Object)
+            {
+                return new List<KeyValuePair<Card, int>>();
+            }
+
+            var result = new List<KeyValuePair<Card, int>>();
+            foreach (var item in property.EnumerateObject())
+            {
+                if (!TryParseCardText(item.Name, out var card))
+                    continue;
+
+                int count = item.Value.ValueKind == JsonValueKind.Number && item.Value.TryGetInt32(out var value)
+                    ? value
+                    : 0;
+                result.Add(new KeyValuePair<Card, int>(card, count));
+            }
+
+            return result;
+        }
+
+        private static Dictionary<int, List<string>> ReadStringListMap(JsonElement element, string propertyName)
+        {
+            var result = new Dictionary<int, List<string>>();
+            if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Object)
+                return result;
+
+            foreach (var item in property.EnumerateObject())
+            {
+                if (!int.TryParse(item.Name, out var playerIndex) || item.Value.ValueKind != JsonValueKind.Array)
+                    continue;
+
+                result[playerIndex] = item.Value.EnumerateArray()
+                    .Where(value => value.ValueKind == JsonValueKind.String)
+                    .Select(value => value.GetString() ?? string.Empty)
+                    .Where(text => !string.IsNullOrWhiteSpace(text))
+                    .ToList();
+            }
+
+            return result;
+        }
+
+        private static bool TryParseCardText(string text, out Card card)
+        {
+            card = new Card(Suit.Spade, Rank.Two);
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            if (text == "大王")
+            {
+                card = new Card(Suit.Joker, Rank.BigJoker);
+                return true;
+            }
+
+            if (text == "小王")
+            {
+                card = new Card(Suit.Joker, Rank.SmallJoker);
+                return true;
+            }
+
+            if (text.Length < 2)
+                return false;
+
+            Suit suit = text[0] switch
+            {
+                '♠' => Suit.Spade,
+                '♥' => Suit.Heart,
+                '♣' => Suit.Club,
+                '♦' => Suit.Diamond,
+                _ => (Suit)(-1)
+            };
+            if ((int)suit < 0)
+                return false;
+
+            string rankText = text.Substring(1);
+            if (!TryParseRankText(rankText, out var rank))
+                return false;
+
+            card = new Card(suit, rank);
+            return true;
+        }
+
+        private static bool TryParseRankText(string text, out Rank rank)
+        {
+            rank = Rank.Two;
+            return text switch
+            {
+                "A" => AssignRank(Rank.Ace, out rank),
+                "K" => AssignRank(Rank.King, out rank),
+                "Q" => AssignRank(Rank.Queen, out rank),
+                "J" => AssignRank(Rank.Jack, out rank),
+                "10" => AssignRank(Rank.Ten, out rank),
+                "9" => AssignRank(Rank.Nine, out rank),
+                "8" => AssignRank(Rank.Eight, out rank),
+                "7" => AssignRank(Rank.Seven, out rank),
+                "6" => AssignRank(Rank.Six, out rank),
+                "5" => AssignRank(Rank.Five, out rank),
+                "4" => AssignRank(Rank.Four, out rank),
+                "3" => AssignRank(Rank.Three, out rank),
+                "2" => AssignRank(Rank.Two, out rank),
+                _ => false
+            };
+        }
+
+        private static bool AssignRank(Rank value, out Rank rank)
+        {
+            rank = value;
+            return true;
         }
     }
 }

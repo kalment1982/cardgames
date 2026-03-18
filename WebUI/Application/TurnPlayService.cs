@@ -48,6 +48,7 @@ public sealed class TurnPlayService
             if (isLastPlayer)
                 setDisplayTrick(null);
 
+            await refreshUiAsync();
             await pushEventAsync(new
             {
                 type = "play_rejected",

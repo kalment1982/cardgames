@@ -55,6 +55,14 @@ namespace TractorGame.Core.GameFlow
             return result;
         }
 
+        public int DetermineNextDealerIndex(int currentDealerIndex, string winner)
+        {
+            int normalizedDealer = ((currentDealerIndex % 4) + 4) % 4;
+            return winner == "庄家"
+                ? normalizedDealer
+                : (normalizedDealer + 1) % 4;
+        }
+
         private Rank CalculateNextLevel(Rank current, int change)
         {
             int[] levels = { 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }; // 2-A

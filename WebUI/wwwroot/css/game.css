@@ -427,14 +427,6 @@
     opacity: 1;
 }
 
-.card-corner-zoom {
-    display: none;
-}
-
-.card-corner-zoom-image {
-    display: none;
-}
-
 .hand-card-back {
     flex: 0 0 auto;
     width: 60px;

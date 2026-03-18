@@ -47,6 +47,70 @@ namespace TractorGame.Tests
         }
 
         [Fact]
+        public void FinalizeTrump_WhenJokerBid_SetsNoTrumpAndKeepsDealerByDefault()
+        {
+            var game = new Game(1);
+            game.StartGame();
+            DealToEnd(game);
+
+            var bid = game.BidTrumpEx(2, new List<Card>
+            {
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.SmallJoker)
+            });
+            Assert.True(bid.Success);
+
+            var finalize = game.FinalizeTrumpEx();
+
+            Assert.True(finalize.Success);
+            Assert.Null(game.State.TrumpSuit);
+            Assert.Equal(0, game.State.DealerIndex);
+            Assert.Equal(GamePhase.Burying, game.State.Phase);
+        }
+
+        [Fact]
+        public void FinalizeTrump_WhenConfiguredBidWinnerBecomesDealer_TransfersDealerToBidder()
+        {
+            var game = new Game(1, bidWinnerBecomesDealer: true);
+            game.StartGame();
+            DealToEnd(game);
+
+            var bid = game.BidTrumpEx(2, new List<Card>
+            {
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.SmallJoker)
+            });
+            Assert.True(bid.Success);
+
+            var finalize = game.FinalizeTrumpEx();
+
+            Assert.True(finalize.Success);
+            Assert.Null(game.State.TrumpSuit);
+            Assert.Equal(2, game.State.DealerIndex);
+        }
+
+        [Fact]
+        public void FinalizeTrump_WhenEstablishedDealerExists_BidDoesNotStealDealer()
+        {
+            var game = new Game(1);
+            game.State.DealerIndex = 2;
+            game.StartGame();
+            DealToEnd(game);
+
+            var bid = game.BidTrumpEx(1, new List<Card>
+            {
+                new Card(Suit.Spade, Rank.Two)
+            });
+            Assert.True(bid.Success);
+
+            var finalize = game.FinalizeTrumpEx();
+
+            Assert.True(finalize.Success);
+            Assert.Equal(2, game.State.DealerIndex);
+            Assert.Equal(Suit.Spade, game.State.TrumpSuit);
+        }
+
+        [Fact]
         public void BuryBottom_Valid_Success()
         {
             var game = new Game(1);

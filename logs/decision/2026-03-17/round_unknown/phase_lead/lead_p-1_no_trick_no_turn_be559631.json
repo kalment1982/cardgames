@@ -1,0 +1,339 @@
+﻿{
+  "schema_version": "1.3",
+  "ts_utc": "2026-03-17T10:17:23.152862Z",
+  "level": "INFO",
+  "category": "diag",
+  "event": "ai.bundle",
+  "session_id": null,
+  "game_id": null,
+  "round_id": null,
+  "trick_id": null,
+  "turn_id": null,
+  "seq": 15,
+  "phase": "Lead",
+  "actor": "rule_ai",
+  "correlation_id": "lead_p-1_no_trick_no_turn_be559631",
+  "causation_id": null,
+  "payload": {
+    "decision_trace_id": "lead_p-1_no_trick_no_turn_be559631",
+    "bundle_version": "1.0",
+    "phase": "Lead",
+    "path": "rule_ai_v21_lead_policy2",
+    "player_index": -1,
+    "bundle": {
+      "meta": {
+        "decision_trace_id": "lead_p-1_no_trick_no_turn_be559631",
+        "phase": "Lead",
+        "path": "rule_ai_v21_lead_policy2",
+        "difficulty": "Easy",
+        "player_index": -1,
+        "role": "Opponent",
+        "session_id": null,
+        "game_id": null,
+        "round_id": null,
+        "trick_id": null,
+        "turn_id": null
+      },
+      "context_snapshot": {
+        "trick_index": 0,
+        "turn_index": 0,
+        "play_position": 1,
+        "dealer_index": -1,
+        "current_winning_player": -1,
+        "partner_winning": false,
+        "trick_score": 0,
+        "cards_left_min": 4,
+        "my_hand": [
+          {
+            "suit": "Heart",
+            "rank": "Three",
+            "score": 0,
+            "text": "\u26653"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Four",
+            "score": 0,
+            "text": "\u26654"
+          },
+          {
+            "suit": "Heart",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26655"
+          },
+          {
+            "suit": "Diamond",
+            "rank": "Six",
+            "score": 0,
+            "text": "\u26666"
+          }
+        ],
+        "lead_cards": [],
+        "current_winning_cards": [],
+        "visible_bottom_cards": [],
+        "game_config": {
+          "trump_suit": "Spade",
+          "level_rank": "Two",
+          "throw_fail_penalty": 0,
+          "enable_counter_bottom": false,
+          "strict_follow_structure": true,
+          "strict_cut_structure": true
+        },
+        "hand_profile": {
+          "trump_count": 0,
+          "high_trump_count": 0,
+          "joker_count": 0,
+          "level_card_count": 0,
+          "trump_pair_count": 0,
+          "trump_tractor_count": 0,
+          "suit_lengths": {
+            "Heart": 3,
+            "Diamond": 1
+          },
+          "strongest_suit": "Heart",
+          "weakest_suit": "Diamond",
+          "potential_void_targets": [
+            "Diamond",
+            "Heart"
+          ],
+          "score_card_count": 1,
+          "structure_summary": "trump=0,pairs=0,tractors=0"
+        },
+        "memory_snapshot": {
+          "played_count_by_card": {},
+          "void_suits_by_player": {},
+          "no_pair_evidence": {},
+          "no_tractor_evidence": {},
+          "known_bottom_cards": []
+        },
+        "inference_snapshot": {
+          "estimated_trump_count_by_player": {},
+          "high_trump_risk_by_player": {},
+          "pair_potential_by_system": {},
+          "tractor_potential_by_system": {},
+          "throw_safety_estimate": {
+            "level": "UnsafeRejected",
+            "success_probability": 0,
+            "is_deterministically_safe": false
+          },
+          "lead_cut_risk_by_system": {},
+          "mate_hold_confidence": {
+            "probability": 0,
+            "confidence": 0
+          },
+          "endgame_bottom_threat": {
+            "level": "None",
+            "confidence": 0
+          }
+        },
+        "decision_frame": {
+          "phase_kind": "Lead",
+          "trick_index": 0,
+          "turn_index": 0,
+          "play_position": 1,
+          "cards_left_min": 4,
+          "current_winning_player": -1,
+          "partner_winning": false,
+          "lead_cards": [],
+          "current_winning_cards": [],
+          "current_trick_score": 0,
+          "defender_score": 0,
+          "bottom_points": 0,
+          "played_score_total": 0,
+          "remaining_score_total": 200,
+          "remaining_score_cards": 24,
+          "bottom_risk_pressure": "None",
+          "dealer_retention_risk": "None",
+          "bottom_contest_pressure": "Medium",
+          "score_pressure": "Relaxed",
+          "endgame_level": "FinalThree"
+        }
+      },
+      "intent_snapshot": {
+        "primary_intent": "PrepareEndgame",
+        "secondary_intent": "TakeScore",
+        "selected_reason": "prepare_endgame_preserve_control",
+        "phase_policy": "LeadPolicy2",
+        "hard_rule_rejects": [],
+        "risk_flags": [
+          "endgame_FinalThree"
+        ],
+        "tags": [
+          "LeadPolicy2",
+          "ContestBottom"
+        ]
+      },
+      "candidate_details": [
+        {
+          "candidate_index": 0,
+          "cards": [
+            {
+              "suit": "Heart",
+              "rank": "Five",
+              "score": 5,
+              "text": "\u26655"
+            }
+          ],
+          "score": 18.393,
+          "reason_code": "prepare_endgame_preserve_control",
+          "features": {
+            "TrickWinValue": 0.5833333333333334,
+            "TrickScoreSwing": 0.5,
+            "ContestBottomValue": 2,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0,
+            "EndgameReserveValue": 3
+          },
+          "is_selected": true
+        },
+        {
+          "candidate_index": 1,
+          "cards": [
+            {
+              "suit": "Diamond",
+              "rank": "Six",
+              "score": 0,
+              "text": "\u26666"
+            }
+          ],
+          "score": 18.3619,
+          "reason_code": "prepare_endgame_preserve_control",
+          "features": {
+            "TrickWinValue": 0.5888888888888889,
+            "TrickScoreSwing": 0,
+            "ContestBottomValue": 2,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0,
+            "EndgameReserveValue": 3.15
+          },
+          "is_selected": false
+        },
+        {
+          "candidate_index": 2,
+          "cards": [
+            {
+              "suit": "Heart",
+              "rank": "Three",
+              "score": 0,
+              "text": "\u26653"
+            }
+          ],
+          "score": 18.3328,
+          "reason_code": "prepare_endgame_preserve_control",
+          "features": {
+            "TrickWinValue": 0.5722222222222222,
+            "TrickScoreSwing": 0,
+            "ContestBottomValue": 2,
+            "BottomSafetyValue": 0,
+            "LeadControlValue": 1,
+            "HandShapeValue": 0,
+            "MateSyncValue": 0,
+            "TrumpConsumptionCost": 0,
+            "HighControlLossCost": 0,
+            "StructureBreakCost": 0,
+            "InfoLeakCost": 0,
+            "RecutRiskCost": 0,
+            "EndgameReserveValue": 3.15
+          },
+          "is_selected": false
+        }
+      ],
+      "selected_action": {
+        "cards": [
+          {
+            "suit": "Heart",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26655"
+          }
+        ],
+        "score": 18.393,
+        "reason_code": "prepare_endgame_preserve_control",
+        "features": {
+          "TrickWinValue": 0.5833333333333334,
+          "TrickScoreSwing": 0.5,
+          "ContestBottomValue": 2,
+          "BottomSafetyValue": 0,
+          "LeadControlValue": 1,
+          "HandShapeValue": 0,
+          "MateSyncValue": 0,
+          "TrumpConsumptionCost": 0,
+          "HighControlLossCost": 0,
+          "StructureBreakCost": 0,
+          "InfoLeakCost": 0,
+          "RecutRiskCost": 0,
+          "EndgameReserveValue": 3
+        }
+      },
+      "compare_snapshot": {
+        "shadow_compared": true,
+        "divergence": true,
+        "old_path": "legacy",
+        "new_path": "rule_ai_v21_lead_policy2",
+        "old_action": [
+          {
+            "suit": "Heart",
+            "rank": "Three",
+            "score": 0,
+            "text": "\u26653"
+          }
+        ],
+        "new_action": [
+          {
+            "suit": "Heart",
+            "rank": "Five",
+            "score": 5,
+            "text": "\u26655"
+          }
+        ],
+        "old_reason": "easy_random_single",
+        "new_reason": "prepare_endgame_preserve_control",
+        "old_intent": "TakeLead",
+        "new_intent": "PrepareEndgame"
+      },
+      "perf_snapshot": {
+        "total_ms": 2.7643,
+        "context_ms": 0.0233,
+        "legacy_ms": 0.1004,
+        "shadow_ms": 2.6401,
+        "candidate_count": 3,
+        "selected_score": 18.393
+      },
+      "truth_snapshot": {
+        "enabled": false
+      },
+      "algorithm_trace": {
+        "policy_module": "LeadPolicy2",
+        "path": "rule_ai_v21_lead_policy2",
+        "phase": "Lead",
+        "use_rule_ai_v21": true,
+        "shadow_compare_enabled": true,
+        "shadow_compared": true,
+        "shadow_sample_rate": 1,
+        "decision_trace_enabled": true,
+        "decision_trace_include_truth_snapshot": true,
+        "decision_trace_max_candidates": 0,
+        "candidate_count": 3
+      }
+    }
+  },
+  "metrics": {
+    "candidate_count": 3,
+    "selected_score": 18.393
+  }
+}

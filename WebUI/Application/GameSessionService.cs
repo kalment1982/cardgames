@@ -11,10 +11,14 @@ namespace WebUI.Application;
 
 public sealed class GameSessionService
 {
-    public (Game Game, int Seed) StartNewGame(int? forcedSeed, int dealerIndex = 0, Rank levelRank = Rank.Two)
+    public (Game Game, int Seed) StartNewGame(
+        int? forcedSeed,
+        int dealerIndex = 0,
+        Rank levelRank = Rank.Two,
+        bool bidWinnerBecomesDealer = false)
     {
         int seed = forcedSeed ?? DateTime.Now.Millisecond;
-        var game = new Game(seed);
+        var game = new Game(seed, bidWinnerBecomesDealer: bidWinnerBecomesDealer);
         game.State.DealerIndex = ((dealerIndex % 4) + 4) % 4;
         game.State.LevelRank = levelRank;
         game.StartGame();
@@ -161,6 +165,7 @@ public sealed class GameSessionService
     {
         return suit switch
         {
+            Suit.Joker => "无主",
             Suit.Spade => "♠",
             Suit.Heart => "♥",
             Suit.Club => "♣",

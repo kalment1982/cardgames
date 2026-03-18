@@ -110,9 +110,6 @@
                 {
                     <div class="played-card-shell @GetCardSizeClass(GetPlayedCards(2).Count)">
                         <img src="@GetCardImage(card)" class="played-card-face" data-testid="played-card" alt="@card" />
-                        <div class="card-corner-zoom" aria-hidden="true">
-                            <img src="@GetCardImage(card)" class="card-corner-zoom-image" alt="" />
-                        </div>
                     </div>
                 }
             </div>
@@ -125,9 +122,6 @@
                     {
                         <div class="played-card-shell @GetCardSizeClass(GetPlayedCards(3).Count)">
                             <img src="@GetCardImage(card)" class="played-card-face" data-testid="played-card" alt="@card" />
-                            <div class="card-corner-zoom" aria-hidden="true">
-                                <img src="@GetCardImage(card)" class="card-corner-zoom-image" alt="" />
-                            </div>
                         </div>
                     }
                 </div>
@@ -138,9 +132,6 @@
                     {
                         <div class="played-card-shell @GetCardSizeClass(GetPlayedCards(1).Count)">
                             <img src="@GetCardImage(card)" class="played-card-face" data-testid="played-card" alt="@card" />
-                            <div class="card-corner-zoom" aria-hidden="true">
-                                <img src="@GetCardImage(card)" class="card-corner-zoom-image" alt="" />
-                            </div>
                         </div>
                     }
                 </div>
@@ -152,9 +143,6 @@
                 {
                     <div class="played-card-shell @GetCardSizeClass(GetPlayedCards(0).Count)">
                         <img src="@GetCardImage(card)" class="played-card-face" data-testid="played-card" alt="@card" />
-                        <div class="card-corner-zoom" aria-hidden="true">
-                            <img src="@GetCardImage(card)" class="card-corner-zoom-image" alt="" />
-                        </div>
                     </div>
                 }
             </div>
@@ -186,9 +174,6 @@
                 <img src="@GetCardImage(card)"
                      class="hand-card"
                      alt="@card" />
-                <div class="card-corner-zoom" aria-hidden="true">
-                    <img src="@GetCardImage(card)" class="card-corner-zoom-image" alt="" />
-                </div>
             </div>
         }
         @if (_isDealingBiddingAnimation)
@@ -291,6 +276,7 @@
     private string _biddingAnimationText = string.Empty;
     private int _lastBidPlayer = -1;
     private bool _pendingAiAutoPlayAfterDealing;
+    private bool _isFirstCampaignRound = true;
     private BidPolicy? _bidPolicy;
 
     protected override void OnInitialized()
@@ -349,9 +335,14 @@
         _pendingAiAutoPlayAfterDealing = false;
 
         var roundLevel = GetCurrentDealerTeamLevel();
-        var session = GameSessionService.StartNewGame(ForcedSeed, _campaignDealerIndex, roundLevel);
+        var session = GameSessionService.StartNewGame(
+            ForcedSeed,
+            _campaignDealerIndex,
+            roundLevel,
+            bidWinnerBecomesDealer: _isFirstCampaignRound);
         game = session.Game;
         CurrentSeed = session.Seed;
+        _isFirstCampaignRound = false;
         _bidPolicy = new BidPolicy(CurrentSeed + 12037);
         _trickNumber = 0;
         _actionCounter = 0;
@@ -402,9 +393,9 @@
     {
         // 映射到实际的图片文件名
         if (card.Rank == Rank.BigJoker)
-            return "assets/playingcardshl/red_joker.svg";
+            return "assets/playingcardshl/red_joker.png";
         if (card.Rank == Rank.SmallJoker)
-            return "assets/playingcardshl/black_joker.svg";
+            return "assets/playingcardshl/black_joker.png";
 
         string rank = card.Rank switch
         {
@@ -433,7 +424,7 @@
             _ => "spades"
         };
 
-        return $"assets/playingcardshl/{rank}_of_{suit}.svg";
+        return $"assets/playingcardshl/{rank}_of_{suit}.png";
     }
 
     private void ToggleCardSelection(int index)
@@ -594,12 +585,11 @@
         _roundTransitioning = true;
         ShowNextRoundButton = true;
 
-        var dealerTeamIsOurSide = _campaignDealerIndex % 2 == 0;
+        int currentDealer = game.State.DealerIndex;
+        var dealerTeamIsOurSide = currentDealer % 2 == 0;
         var dealerTeamLevel = dealerTeamIsOurSide ? _ourTeamLevelRank : _theirTeamLevelRank;
         var result = _levelManager.DetermineLevelChange(game.State.DefenderScore, dealerTeamLevel);
-        int nextDealer = result.Winner == "闲家"
-            ? (_campaignDealerIndex + 1) % 4
-            : _campaignDealerIndex;
+        int nextDealer = _levelManager.DetermineNextDealerIndex(currentDealer, result.Winner);
 
         if (result.Winner == "庄家")
         {
@@ -618,7 +608,7 @@
 
         _campaignDealerIndex = nextDealer;
 
-        ShowMessage($"本局结束！闲家得分：{game.State.DefenderScore}。下一局庄家：玩家{_campaignDealerIndex}，打{FormatLevel(GetCurrentDealerTeamLevel())}。");
+        ShowMessage($"本局结束！闲家得分：{game.State.DefenderScore}。下一局庄家：{GetPlayerLabel(_campaignDealerIndex)}，打{FormatLevel(GetCurrentDealerTeamLevel())}。");
         await InvokeAsync(StateHasChanged);
 
         if (IsUiTestMode)
@@ -806,7 +796,9 @@
             cards = SerializeCards(bidCards)
         });
 
-        ShowMessage($"亮主成功：{GameSessionService.GetSuitSymbol(suit)}");
+        ShowMessage(suit == Suit.Joker
+            ? "反无主成功"
+            : $"亮主成功：{GameSessionService.GetSuitSymbol(suit)}");
 
         // 延迟后确定主花色并进入扣底阶段
         await Task.Delay(350);
@@ -930,8 +922,8 @@
                 var suit = bidCards[0].Suit;
                 _lastBidPlayer = player;
                 UpdateUI();
-                lastBidInfo = $"P{player}亮{GameSessionService.GetSuitSymbol(suit)}({bidCards.Count}张级牌)";
-                _biddingAnimationText = $"竞叫：{GetPlayerLabel(player)} 亮{GameSessionService.GetSuitSymbol(suit)}";
+                lastBidInfo = $"P{player}{FormatBidSummary(suit, bidCards.Count)}";
+                _biddingAnimationText = $"竞叫：{GetPlayerLabel(player)} {FormatBidActionText(suit)}";
                 await InvokeAsync(StateHasChanged);
                 await PushTestEventAsync(new
                 {
@@ -958,13 +950,8 @@
             {
                 var bidPlayer = game.CurrentBidPlayer;
                 var bidSuit = game.CurrentBidSuit.Value;
-                var bidCount = game.CurrentBidPriority switch
-                {
-                    0 => 1,
-                    1 => 2,
-                    _ => 3
-                };
-                ShowMessage($"发牌竞叫完成：{GetPlayerLabel(bidPlayer)}亮{GameSessionService.GetSuitSymbol(bidSuit)}（{bidCount}张级牌）");
+                var bidCount = ResolveBidCardCount(game.CurrentBidSuit, game.CurrentBidPriority);
+                ShowMessage($"发牌竞叫完成：{GetPlayerLabel(bidPlayer)}{FormatBidSummary(bidSuit, bidCount)}");
             }
             else if (lastBidInfo != null)
                 ShowMessage($"发牌竞叫完成：{lastBidInfo}");
@@ -1412,22 +1399,16 @@
         {
             var player = game.CurrentBidPlayer;
             var suit = game.CurrentBidSuit;
-            var symbol = suit.HasValue ? GameSessionService.GetSuitSymbol(suit.Value) : "?";
-            var levelCount = game.CurrentBidPriority switch
-            {
-                0 => 1,
-                1 => 2,
-                _ => 3
-            };
+            var levelCount = ResolveBidCardCount(suit, game.CurrentBidPriority);
 
             if (player >= 0)
-                return $"亮主失败：当前{GetPlayerLabel(player)}已亮{symbol}（{levelCount}张级牌）";
+                return $"亮主失败：当前{GetPlayerLabel(player)}已{FormatBidSummary(suit ?? Suit.Spade, levelCount)}";
 
             return "亮主失败：已有更高优先级亮主";
         }
 
         if (reasonCode == ReasonCodes.BidNotLevelCard)
-            return "亮主失败：必须使用同花色级牌";
+            return "亮主失败：必须使用同花色级牌，或用一对大小王反无主";
 
         if (reasonCode == ReasonCodes.PhaseInvalid)
             return "亮主失败：当前阶段不可亮主";
@@ -1444,6 +1425,33 @@
             return "size-medium";  // 4-8张：中尺寸 (55x82)
         else
             return "size-small";   // 9张以上：小尺寸 (45x67)
+    }
+
+    private static int ResolveBidCardCount(Suit? suit, int priority)
+    {
+        if (suit == Suit.Joker)
+            return 2;
+
+        return priority switch
+        {
+            0 => 1,
+            1 => 2,
+            _ => 3
+        };
+    }
+
+    private static string FormatBidActionText(Suit suit)
+    {
+        return suit == Suit.Joker
+            ? "反无主"
+            : $"亮{GameSessionService.GetSuitSymbol(suit)}";
+    }
+
+    private static string FormatBidSummary(Suit suit, int cardCount)
+    {
+        return suit == Suit.Joker
+            ? $"反无主（{cardCount}张王）"
+            : $"亮{GameSessionService.GetSuitSymbol(suit)}（{cardCount}张级牌）";
     }
 
     private Task ToggleSettings()

@@ -11,7 +11,7 @@ import numpy as np
 class PolicyValueNetwork(nn.Module):
     """策略-价值网络（共享编码器）"""
 
-    def __init__(self, state_dim=338, action_dim=108, hidden_dim=256):
+    def __init__(self, state_dim=382, action_dim=384, hidden_dim=256):
         super().__init__()
 
         # 共享编码器
@@ -73,7 +73,7 @@ class PolicyValueNetwork(nn.Module):
 class PPOAgent:
     """PPO智能体"""
 
-    def __init__(self, state_dim=338, action_dim=108, device='mps', lr=3e-4):
+    def __init__(self, state_dim=382, action_dim=384, device='mps', lr=3e-4):
         self.device = torch.device(device)
         self.action_dim = action_dim
 
@@ -88,7 +88,7 @@ class PPOAgent:
         self.value_coef = 0.5
         self.entropy_coef = 0.01
 
-    def select_action(self, state: np.ndarray, action_mask: np.ndarray = None, deterministic=False) -> Tuple[int, float]:
+    def select_action(self, state: np.ndarray, action_mask: np.ndarray = None, deterministic=False) -> Tuple[int, float, float]:
         """选择动作
 
         Args:
@@ -99,6 +99,7 @@ class PPOAgent:
         Returns:
             action_index: 动作索引
             log_prob: 对数概率
+            value: 状态价值估计
         """
         self.network.eval()
 
@@ -110,8 +111,9 @@ class PPOAgent:
             else:
                 mask_tensor = None
 
-            action_probs, _ = self.network(state_tensor, mask_tensor)
+            action_probs, value = self.network(state_tensor, mask_tensor)
             action_probs = action_probs.squeeze(0)
+            value = value.squeeze().item()
 
             # 选择动作
             if deterministic:
@@ -123,7 +125,7 @@ class PPOAgent:
             # 计算log概率
             log_prob = torch.log(action_probs[action_index] + 1e-8).item()
 
-        return action_index, log_prob
+        return action_index, log_prob, value
 
     def evaluate_actions(self, states: torch.Tensor, actions: torch.Tensor,
                         action_masks: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -268,34 +270,35 @@ if __name__ == '__main__':
     # 检查MPS可用性
     if torch.backends.mps.is_available():
         device = 'mps'
-        print("✅ MPS (M4 GPU) 可用")
+        print("MPS (M4 GPU) available")
     else:
         device = 'cpu'
-        print("⚠️  MPS不可用，使用CPU")
+        print("MPS not available, using CPU")
 
     # 创建agent
     agent = PPOAgent(device=device)
-    print(f"Agent创建成功，设备: {device}")
+    print(f"Agent created, device: {device}")
 
     # 测试选择动作
-    state = np.random.randn(338).astype(np.float32)
-    action_mask = np.ones(108, dtype=bool)
-    action_mask[50:] = False  # 只有前50个动作合法
+    state = np.random.randn(382).astype(np.float32)
+    action_mask = np.ones(384, dtype=bool)
+    action_mask[100:] = False
 
-    action, log_prob = agent.select_action(state, action_mask)
-    print(f"选择动作: {action}, log_prob: {log_prob:.4f}")
+    action, log_prob, value = agent.select_action(state, action_mask)
+    print(f"Action: {action}, log_prob: {log_prob:.4f}, value: {value:.4f}")
 
     # 测试更新
-    states = np.random.randn(100, 338).astype(np.float32)
-    actions = np.random.randint(0, 50, 100)
+    states = np.random.randn(100, 382).astype(np.float32)
+    actions = np.random.randint(0, 100, 100)
     old_log_probs = np.random.randn(100).astype(np.float32)
     advantages = np.random.randn(100).astype(np.float32)
     returns = np.random.randn(100).astype(np.float32)
+    masks = np.ones((100, 384), dtype=bool)
 
     policy_loss, value_loss = agent.update(
-        states, actions, old_log_probs, advantages, returns,
+        states, actions, old_log_probs, advantages, returns, masks,
         epochs=2, batch_size=32
     )
-    print(f"更新完成 - Policy Loss: {policy_loss:.4f}, Value Loss: {value_loss:.4f}")
+    print(f"Update done - Policy Loss: {policy_loss:.4f}, Value Loss: {value_loss:.4f}")
 
-    print("\n✅ 所有测试通过！")
+    print("\nAll tests passed!")

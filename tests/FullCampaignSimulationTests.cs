@@ -41,8 +41,8 @@ namespace TractorGame.Tests
             log.AppendLine("╔══════════════════════════════════════════════════════════════════╗");
             log.AppendLine("║         拖拉机升级赛：从2打到A完整模拟记录                       ║");
             log.AppendLine("╠══════════════════════════════════════════════════════════════════╣");
-            log.AppendLine("║  🔴 红队：玩家0（南）+ 玩家2（北）                               ║");
-            log.AppendLine("║  🔵 蓝队：玩家1（东）+ 玩家3（西）                               ║");
+            log.AppendLine("║  🔴 红队：南家 + 北家                                             ║");
+            log.AppendLine("║  🔵 蓝队：东家 + 西家                                             ║");
             log.AppendLine("║  得分规则：5=5分  10=10分  K=10分  共200分                       ║");
             log.AppendLine("║  升级规则：闲家<40→庄升3  40-79→庄升2  80-119→闲升1             ║");
             log.AppendLine("║           120-159→闲升2  ≥160→闲升3                             ║");
@@ -59,7 +59,7 @@ namespace TractorGame.Tests
 
                 log.AppendLine($"┌──────────────────────────────────────────────────────────────────");
                 log.AppendLine($"│ 第 {roundNumber,2} 局");
-                log.AppendLine($"│ 庄家：玩家{dealerIndex}（{TeamName(dealerTeam)}）  打：{RankName(levelRank)}  主花色：{SuitName(trumpSuit)}");
+                log.AppendLine($"│ 庄家：{PlayerName(dealerIndex)}（{TeamName(dealerTeam)}）  打：{RankName(levelRank)}  主花色：{SuitName(trumpSuit)}");
                 log.AppendLine($"│ 红队级别：{RankName((Rank)teamLevel[0])}  蓝队级别：{RankName((Rank)teamLevel[1])}");
                 log.AppendLine($"└──────────────────────────────────────────────────────────────────");
 
@@ -87,7 +87,7 @@ namespace TractorGame.Tests
                 foreach (var c in buried) hands[dealerIndex].Remove(c);
 
                 log.AppendLine($"  底牌（庄家扣入）：{CardsToString(buried)}");
-                log.AppendLine($"  各家手牌数：{string.Join(" ", Enumerable.Range(0, 4).Select(p => $"玩家{p}={hands[p].Count}张"))}");
+                log.AppendLine($"  各家手牌数：{string.Join(" ", Enumerable.Range(0, 4).Select(p => $"{PlayerName(p)}={hands[p].Count}张"))}");
                 log.AppendLine();
 
                 // ── 出牌阶段 ────────────────────────────────────────────────────
@@ -135,8 +135,8 @@ namespace TractorGame.Tests
                     {
                         var row = $"  第{trickNum:D2}墩 │ " +
                             string.Join(" │ ", plays.Select(pl =>
-                                $"玩家{pl.player}[{SeatTag(pl.player, dealerIndex)}]{CardName(pl.card),5}")) +
-                            $" │ 赢：玩家{winner}[{SeatTag(winner, dealerIndex)}]" +
+                                $"{PlayerName(pl.player)}[{SeatTag(pl.player, dealerIndex)}]{CardName(pl.card),5}")) +
+                            $" │ 赢：{PlayerName(winner)}[{SeatTag(winner, dealerIndex)}]" +
                             (trickScore > 0 ? $" 💰{trickScore}分" : "");
                         trickRows.Add(row);
                     }
@@ -173,7 +173,7 @@ namespace TractorGame.Tests
                 if (result.NextDealer == "庄家")
                 {
                     teamLevel[dealerTeam] = (int)result.NextLevel;
-                    dealerIndex = (dealerIndex + 2) % 4; // 同队换人
+                    dealerIndex = dealerIndex; // 原庄继续坐庄
                 }
                 else
                 {
@@ -183,7 +183,7 @@ namespace TractorGame.Tests
                     dealerIndex = (dealerIndex + 1) % 4; // 闲家接庄
                 }
 
-                log.AppendLine($"  下一局：庄家=玩家{dealerIndex}（{TeamName(dealerTeam)}）  红队={RankName((Rank)teamLevel[0])}  蓝队={RankName((Rank)teamLevel[1])}");
+                log.AppendLine($"  下一局：庄家={PlayerName(dealerIndex)}（{TeamName(dealerTeam)}）  红队={RankName((Rank)teamLevel[0])}  蓝队={RankName((Rank)teamLevel[1])}");
                 log.AppendLine();
 
                 // ── 通关检测 ─────────────────────────────────────────────────────
@@ -269,6 +269,15 @@ namespace TractorGame.Tests
 
         // ── 辅助：显示 ───────────────────────────────────────────────────────
         private static string TeamName(int team) => team == 0 ? "🔴红队" : "🔵蓝队";
+
+        private static string PlayerName(int player) => player switch
+        {
+            0 => "南家",
+            1 => "东家",
+            2 => "北家",
+            3 => "西家",
+            _ => $"未知({player})"
+        };
 
         private static string SeatTag(int player, int dealerIndex)
         {

@@ -105,6 +105,74 @@ namespace TractorGame.Tests.V21
         }
 
         [Fact]
+        public void Decide_WhenPartnerWinningAndNoPointDifference_PrefersLowerSloughOverAce()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Diamond };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Diamond, Rank.Ten),
+                new Card(Suit.Club, Rank.Four),
+                new Card(Suit.Club, Rank.Ace),
+                new Card(Suit.Club, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Five),
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Spade, Rank.Ace),
+                new Card(Suit.Club, Rank.Seven),
+                new Card(Suit.Club, Rank.Eight),
+                new Card(Suit.Heart, Rank.Jack),
+                new Card(Suit.Diamond, Rank.King),
+                new Card(Suit.Club, Rank.Four),
+                new Card(Suit.Club, Rank.Three),
+                new Card(Suit.Club, Rank.Seven),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Spade, Rank.Jack),
+                new Card(Suit.Heart, Rank.Six),
+                new Card(Suit.Heart, Rank.Three),
+                new Card(Suit.Club, Rank.King),
+                new Card(Suit.Diamond, Rank.Eight),
+                new Card(Suit.Spade, Rank.Six),
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Heart, Rank.Two)
+            };
+
+            var context = new RuleAIContextBuilder(config, AIDifficulty.Hard, null, new CardMemory(config)).BuildFollowContext(
+                hand,
+                new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Ten),
+                    new Card(Suit.Spade, Rank.Ten)
+                },
+                new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Ten),
+                    new Card(Suit.Spade, Rank.Ten)
+                },
+                AIRole.DealerPartner,
+                partnerWinning: true,
+                trickScore: 20,
+                playerIndex: 2,
+                dealerIndex: 0,
+                trickIndex: 3,
+                turnIndex: 11,
+                playPosition: 3,
+                currentWinningPlayer: 0,
+                defenderScore: 0,
+                bottomPoints: 10);
+
+            var policy = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                new IntentResolver(config),
+                new ActionScorer(config),
+                new DecisionExplainer());
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal("PassToMate", decision.Explanation.PrimaryIntent);
+            Assert.Contains(decision.SelectedCards, card => card.Suit == Suit.Spade && card.Rank == Rank.Six);
+            Assert.DoesNotContain(decision.SelectedCards, card => card.Suit == Suit.Spade && card.Rank == Rank.Ace);
+        }
+
+        [Fact]
         public void Decide_WhenHighScoreTrickCanOvercut_DoesNotSloughOffsuit()
         {
             var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Diamond };
@@ -153,6 +221,68 @@ namespace TractorGame.Tests.V21
             Assert.NotEqual(
                 "♥9,♥J",
                 string.Join(",", decision.SelectedCards.Select(card => card.ToString()).OrderBy(text => text)));
+        }
+
+        [Fact]
+        public void Decide_WhenMateLeadsLowTrumpAndOpponentBehind_ReinforcesControlWithJoker()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Diamond };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Club, Rank.King),
+                new Card(Suit.Spade, Rank.Two),
+                new Card(Suit.Heart, Rank.Nine),
+                new Card(Suit.Spade, Rank.Eight),
+                new Card(Suit.Heart, Rank.King),
+                new Card(Suit.Heart, Rank.Jack),
+                new Card(Suit.Club, Rank.Ten),
+                new Card(Suit.Spade, Rank.Nine),
+                new Card(Suit.Diamond, Rank.Queen),
+                new Card(Suit.Club, Rank.Four),
+                new Card(Suit.Joker, Rank.BigJoker),
+                new Card(Suit.Club, Rank.Queen),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Diamond, Rank.Five),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Diamond, Rank.Eight),
+                new Card(Suit.Spade, Rank.Nine),
+                new Card(Suit.Heart, Rank.Five),
+                new Card(Suit.Club, Rank.Jack),
+                new Card(Suit.Diamond, Rank.Four),
+                new Card(Suit.Heart, Rank.Ace),
+                new Card(Suit.Heart, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Eight),
+                new Card(Suit.Spade, Rank.Queen)
+            };
+
+            var context = new RuleAIContextBuilder(config, AIDifficulty.Hard, null, new CardMemory(config)).BuildFollowContext(
+                hand,
+                new List<Card> { new Card(Suit.Diamond, Rank.Three) },
+                new List<Card> { new Card(Suit.Diamond, Rank.Three) },
+                AIRole.DealerPartner,
+                partnerWinning: true,
+                trickScore: 0,
+                playerIndex: 3,
+                dealerIndex: 1,
+                trickIndex: 2,
+                turnIndex: 7,
+                playPosition: 3,
+                currentWinningPlayer: 1,
+                defenderScore: 0,
+                bottomPoints: 10);
+
+            var policy = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                new IntentResolver(config),
+                new ActionScorer(config),
+                new DecisionExplainer());
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal("TakeLead", decision.Explanation.PrimaryIntent);
+            Assert.Single(decision.SelectedCards);
+            Assert.Equal(Suit.Joker, decision.SelectedCards[0].Suit);
+            Assert.Contains(decision.SelectedReason, new[] { "balanced_select", "cheap_overtake_with_acceptable_structure_loss" });
         }
 
         [Fact]
@@ -306,6 +436,49 @@ namespace TractorGame.Tests.V21
             Assert.Single(decision.SelectedCards);
             Assert.Equal(Suit.Heart, decision.SelectedCards[0].Suit);
             Assert.Equal(Rank.Ace, decision.SelectedCards[0].Rank);
+        }
+
+        [Fact]
+        public void Decide_WhenPrepareEndgameOnLowScoreTrick_UsesCheapestSecureTrumpWin()
+        {
+            var config = new GameConfig { LevelRank = Rank.Two, TrumpSuit = Suit.Spade };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Two),
+                new Card(Suit.Joker, Rank.BigJoker),
+                new Card(Suit.Club, Rank.Two),
+                new Card(Suit.Diamond, Rank.Two)
+            };
+
+            var context = new RuleAIContextBuilder(config, AIDifficulty.Hard, null, new CardMemory(config)).BuildFollowContext(
+                hand,
+                new List<Card> { new Card(Suit.Spade, Rank.Five) },
+                new List<Card> { new Card(Suit.Spade, Rank.Five) },
+                AIRole.Dealer,
+                partnerWinning: false,
+                trickScore: 5,
+                cardsLeftMin: 4,
+                playerIndex: 2,
+                dealerIndex: 2,
+                trickIndex: 15,
+                turnIndex: 58,
+                playPosition: 2,
+                currentWinningPlayer: 3,
+                defenderScore: 60,
+                bottomPoints: 20);
+
+            var policy = new FollowPolicy2(
+                new FollowCandidateGenerator(config),
+                new IntentResolver(config),
+                new ActionScorer(config),
+                new DecisionExplainer());
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal("PrepareEndgame", decision.Explanation.PrimaryIntent);
+            Assert.Single(decision.SelectedCards);
+            Assert.Equal(Suit.Diamond, decision.SelectedCards[0].Suit);
+            Assert.Equal(Rank.Two, decision.SelectedCards[0].Rank);
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using TractorGame.Core.Models;
+using TractorGame.Core.Rules;
 
 namespace TractorGame.Core.AI.V21
 {
@@ -58,12 +59,13 @@ namespace TractorGame.Core.AI.V21
             bool contestBottom = context.DecisionFrame.BottomContestPressure >= RiskLevel.Medium;
             bool protectBottom = context.DecisionFrame.BottomRiskPressure >= RiskLevel.High ||
                 context.DecisionFrame.DealerRetentionRisk >= RiskLevel.High;
-            bool hasThrow = (candidates ?? new List<List<Card>>()).Any(cards =>
-                cards.Count >= 3 && new CardPattern(cards, _config).Type == PatternType.Mixed);
+            bool hasCompellingThrow = HasCompellingThrowCandidate(candidates);
             bool trumpHeavy = context.HandProfile.TrumpCount >= System.Math.Max(5, context.HandCount / 2);
             bool longSuit = context.HandProfile.StrongestSuit.HasValue &&
                 context.HandProfile.SuitLengths.TryGetValue(context.HandProfile.StrongestSuit.Value, out var strongestLen) &&
                 strongestLen >= 5;
+            bool earlySideSuitPressure = HasEarlyDealerSideSuitPressure(context);
+            bool generalSideSuitPressure = HasSideSuitPressure(context);
 
             if (endgame && protectBottom)
             {
@@ -80,9 +82,19 @@ namespace TractorGame.Core.AI.V21
                 return BuildIntent(context, DecisionIntentKind.ProtectBottom, DecisionIntentKind.SaveControl, "LeadProtectBottom");
             }
 
-            if (hasThrow && context.StyleProfile.ThrowRiskTolerance >= 0.2)
+            if (hasCompellingThrow)
             {
                 return BuildIntent(context, DecisionIntentKind.PrepareThrow, DecisionIntentKind.PreserveStructure, "PrepareThrow");
+            }
+
+            if (earlySideSuitPressure)
+            {
+                return BuildIntent(context, DecisionIntentKind.AttackLongSuit, DecisionIntentKind.TakeLead, "EarlySideSuit");
+            }
+
+            if (!endgame && !protectBottom && !contestBottom && generalSideSuitPressure)
+            {
+                return BuildIntent(context, DecisionIntentKind.AttackLongSuit, DecisionIntentKind.TakeLead, "SideSuitPressure");
             }
 
             if (trumpHeavy)
@@ -101,6 +113,91 @@ namespace TractorGame.Core.AI.V21
             }
 
             return BuildIntent(context, DecisionIntentKind.TakeLead, DecisionIntentKind.PreserveStructure, "TakeLead");
+        }
+
+        private bool HasCompellingThrowCandidate(IReadOnlyList<List<Card>>? candidates)
+        {
+            if (candidates == null)
+                return false;
+
+            var validator = new ThrowValidator(_config);
+            foreach (var cards in candidates)
+            {
+                if (cards.Count < 3 || cards.Count > 5)
+                    continue;
+
+                var pattern = new CardPattern(cards, _config);
+                if (pattern.Type != PatternType.Mixed)
+                    continue;
+
+                var components = validator.DecomposeThrow(cards);
+                bool hasPairPressure = components.Any(component => component.Count >= 2);
+                bool hasControlSingle = components.Any(component =>
+                    component.Count == 1 &&
+                    IsHighControlThrowSingle(component[0]));
+
+                if (hasPairPressure && hasControlSingle)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool IsHighControlThrowSingle(Card card)
+        {
+            if (card.Rank == Rank.BigJoker || card.Rank == Rank.SmallJoker)
+                return true;
+
+            if (!_config.IsTrump(card) && card.Rank == Rank.Ace)
+                return true;
+
+            return _config.IsTrump(card) && RuleAIUtility.GetCardValue(card, _config) >= 700;
+        }
+
+        private bool HasEarlyDealerSideSuitPressure(RuleAIContext context)
+        {
+            if (context.Role != AIRole.Dealer)
+                return false;
+
+            if (context.DecisionFrame.TrickIndex > 2)
+                return false;
+
+            return HasSideSuitPressure(context);
+        }
+
+        private bool HasSideSuitPressure(RuleAIContext context)
+        {
+            var comparer = new CardComparer(_config);
+            var suitGroups = context.MyHand
+                .Where(card => !_config.IsTrump(card))
+                .GroupBy(card => card.Suit)
+                .ToList();
+
+            foreach (var group in suitGroups)
+            {
+                var cards = group.ToList();
+                if (cards.Count < 2)
+                    continue;
+
+                var strongestTractor = RuleAIUtility.FindStrongestTractor(_config, cards, 4, comparer);
+                if (strongestTractor != null)
+                    return true;
+
+                var strongestPair = RuleAIUtility.FindStrongestPair(cards, comparer);
+                if (strongestPair != null)
+                {
+                    int value = RuleAIUtility.GetCardValue(strongestPair[0], _config);
+                    if (value >= 112 || strongestPair.Sum(card => card.Score) >= 10)
+                        return true;
+                }
+
+                var top = cards.OrderByDescending(card => RuleAIUtility.GetCardValue(card, _config)).First();
+                bool hasSupport = cards.Count >= 2;
+                if (hasSupport && RuleAIUtility.GetCardValue(top, _config) >= 112)
+                    return true;
+            }
+
+            return false;
         }
 
         private ResolvedIntent ResolveFollowIntent(RuleAIContext context, IReadOnlyList<List<Card>>? candidates)
@@ -150,6 +247,11 @@ namespace TractorGame.Core.AI.V21
                     cheapestWinCost <= 1.0 + context.DifficultyProfile.CheapOvertakeTolerance;
                 bool highValueMateProtection = context.TrickScore >= 10 ||
                     (context.DecisionFrame.ScorePressure == ScorePressureLevel.Critical && context.TrickScore >= 5);
+                bool protectMateTrumpControl = ShouldProtectMateTrumpControl(
+                    context,
+                    currentWinning,
+                    winningCandidates,
+                    threatAnalyzer);
 
                 if (affordableWinningTakeover &&
                     scoringTrickWithOpponentBehind &&
@@ -161,6 +263,15 @@ namespace TractorGame.Core.AI.V21
                         DecisionIntentKind.TakeScore,
                         DecisionIntentKind.PreserveStructure,
                         hasStableWinningCandidate ? "ProtectMateScoringTrick" : "ReinforceMateFragileLead");
+                }
+
+                if (protectMateTrumpControl)
+                {
+                    return BuildIntent(
+                        context,
+                        DecisionIntentKind.TakeLead,
+                        DecisionIntentKind.PreserveStructure,
+                        "ProtectMateTrumpControl");
                 }
 
                 var mode = context.InferenceSnapshot.MateHoldConfidence.Probability >= 0.65
@@ -202,6 +313,37 @@ namespace TractorGame.Core.AI.V21
             }
 
             return BuildIntent(context, DecisionIntentKind.MinimizeLoss, DecisionIntentKind.PreserveStructure, "OpponentWinningTooExpensive");
+        }
+
+        private bool ShouldProtectMateTrumpControl(
+            RuleAIContext context,
+            List<Card> currentWinning,
+            List<List<Card>> winningCandidates,
+            FollowThreatAnalyzer threatAnalyzer)
+        {
+            if (context.Role != AIRole.DealerPartner)
+                return false;
+
+            if (context.TrickScore > 0)
+                return false;
+
+            if (currentWinning.Count != 1 || !_config.IsTrump(currentWinning[0]))
+                return false;
+
+            if (RuleAIUtility.GetCardValue(currentWinning[0], _config) > 610)
+                return false;
+
+            if (threatAnalyzer.CountOpponentsBehind(context) <= 0)
+                return false;
+
+            foreach (var candidate in winningCandidates)
+            {
+                var assessment = threatAnalyzer.Analyze(context, candidate, currentWinning);
+                if (assessment.SecurityLevel >= WinSecurityLevel.Lock)
+                    return true;
+            }
+
+            return false;
         }
 
         private static ResolvedIntent BuildIntent(

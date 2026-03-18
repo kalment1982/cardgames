@@ -35,5 +35,39 @@ namespace TractorGame.Tests.V21
             Assert.Contains("Suit:Spade", snapshot.NoPairEvidence[1]);
             Assert.Contains("♣10", snapshot.KnownBottomCards);
         }
+
+        [Fact]
+        public void Build_WhenFollowerRunsOutAfterPartialFollow_MarksVoidForLaterTricks()
+        {
+            var config = new GameConfig { LevelRank = Rank.Four, TrumpSuit = Suit.Club };
+            var memory = new CardMemory(config);
+            memory.RecordTrick(new List<TrickPlay>
+            {
+                new TrickPlay(2, new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Six),
+                    new Card(Suit.Spade, Rank.Six)
+                }),
+                new TrickPlay(1, new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Ten),
+                    new Card(Suit.Diamond, Rank.Seven)
+                }),
+                new TrickPlay(0, new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.Ace),
+                    new Card(Suit.Spade, Rank.Two)
+                }),
+                new TrickPlay(3, new List<Card>
+                {
+                    new Card(Suit.Spade, Rank.King),
+                    new Card(Suit.Spade, Rank.King)
+                })
+            });
+
+            var snapshot = new MemorySnapshotBuilder().Build(memory);
+
+            Assert.Contains("Spade", snapshot.VoidSuitsByPlayer[1]);
+        }
     }
 }

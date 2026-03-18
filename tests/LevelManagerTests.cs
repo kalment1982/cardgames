@@ -115,5 +115,21 @@ namespace TractorGame.Tests
             Assert.Equal(3, result.LevelChange);
             Assert.Equal(Rank.Five, result.NextLevel);
         }
+
+        [Fact]
+        public void DetermineNextDealerIndex_DealerWin_StaysSameDealer()
+        {
+            var manager = new LevelManager();
+            Assert.Equal(0, manager.DetermineNextDealerIndex(0, "庄家"));
+            Assert.Equal(1, manager.DetermineNextDealerIndex(1, "庄家"));
+        }
+
+        [Fact]
+        public void DetermineNextDealerIndex_DefenderWin_RotatesClockwise()
+        {
+            var manager = new LevelManager();
+            Assert.Equal(1, manager.DetermineNextDealerIndex(0, "闲家"));
+            Assert.Equal(0, manager.DetermineNextDealerIndex(3, "闲家"));
+        }
     }
 }

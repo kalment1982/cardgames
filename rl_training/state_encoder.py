@@ -1,219 +1,299 @@
 """
-状态编码器 - 将游戏状态转换为神经网络输入
+StateEncoder — Encode state_snapshot JSON into a fixed-size observation vector.
+
+Follows the Phase-1 encoding spec from ``doc/AI共享决策输入编码定义_v1.0.md``.
+Total observation dimension: 382.
 """
+import logging
+from typing import Optional
+
 import numpy as np
-from typing import List, Tuple
-from game_engine import GameState, Card, Suit, Rank, Role
+
+logger = logging.getLogger(__name__)
+
+# ── Card face index mapping (matches ActionSlotMapper.CardFaceIndex) ──
+# BigJoker=0, SmallJoker=1,
+# ♠A..♠2 = 2..14, ♥A..♥2 = 15..27, ♣A..♣2 = 28..40, ♦A..♦2 = 41..53
+
+_SUIT_OFFSET = {
+    "Spade": 0,
+    "Heart": 13,
+    "Club": 26,
+    "Diamond": 39,
+}
+
+# Rank string -> offset within a suit (A=0, K=1, ..., 2=12)
+_RANK_OFFSET = {
+    "Ace": 0, "King": 1, "Queen": 2, "Jack": 3, "Ten": 4,
+    "Nine": 5, "Eight": 6, "Seven": 7, "Six": 8, "Five": 9,
+    "Four": 10, "Three": 11, "Two": 12,
+}
+
+# Role string -> one-hot index
+_ROLE_INDEX = {"dealer": 0, "dealer_partner": 1, "defender": 2}
+
+# Trump suit string -> one-hot index (5 classes, last is NoTrump)
+_TRUMP_SUIT_INDEX = {
+    "Spade": 0, "Heart": 1, "Club": 2, "Diamond": 3, "NoTrump": 4,
+}
+
+# Level rank string -> one-hot index (13 classes: A=0 .. 2=12)
+_LEVEL_RANK_INDEX = _RANK_OFFSET  # same mapping
+
+# Suit string -> index for per-suit vectors
+_SUIT_INDEX = {"Spade": 0, "Heart": 1, "Club": 2, "Diamond": 3}
+
+# Score values by rank
+_RANK_SCORE = {"Five": 5, "Ten": 10, "King": 10}
+
+
+def card_face_index(card: dict) -> int:
+    """Map a card dict ``{"suit": ..., "rank": ...}`` to 0-53 face index.
+
+    Matches ``ActionSlotMapper.CardFaceIndex`` in C#.
+    """
+    rank = card["rank"]
+    suit = card["suit"]
+    if rank == "BigJoker":
+        return 0
+    if rank == "SmallJoker":
+        return 1
+    return 2 + _SUIT_OFFSET[suit] + _RANK_OFFSET[rank]
+
+
+def encode_card_count_108(cards: list[dict]) -> np.ndarray:
+    """Encode a list of card dicts into a 108-dim vector.
+
+    Each card face (54 faces) occupies 2 slots (two decks).
+    Slot ``face_index * 2`` is the first copy, ``face_index * 2 + 1`` the second.
+    Value is 0 or 1.
+    """
+    vec = np.zeros(108, dtype=np.float32)
+    # Track how many of each face we've seen so far
+    seen = [0] * 54
+    for c in cards:
+        fi = card_face_index(c)
+        copy = seen[fi]
+        if copy < 2:
+            vec[fi * 2 + copy] = 1.0
+        seen[fi] = copy + 1
+    return vec
+
+
+def encode_one_hot(value: int, n: int) -> np.ndarray:
+    """Return an n-dim one-hot vector with index *value* set to 1."""
+    vec = np.zeros(n, dtype=np.float32)
+    if 0 <= value < n:
+        vec[value] = 1.0
+    return vec
+
+
+def _is_trump_card(card: dict, trump_suit: str, level_rank: str) -> bool:
+    """Check whether a card is trump given trump_suit and level_rank strings."""
+    rank = card["rank"]
+    suit = card["suit"]
+    if rank in ("BigJoker", "SmallJoker"):
+        return True
+    if rank == level_rank:
+        return True
+    if trump_suit != "NoTrump" and suit == trump_suit:
+        return True
+    return False
+
+
+def _is_high_trump(card: dict, trump_suit: str, level_rank: str) -> bool:
+    """High trump = jokers + level-rank cards + trump-suit A (if not level rank)."""
+    rank = card["rank"]
+    suit = card["suit"]
+    if rank in ("BigJoker", "SmallJoker"):
+        return True
+    if rank == level_rank:
+        return True
+    # Trump-suit Ace counts as high trump when Ace is not the level rank
+    if trump_suit != "NoTrump" and suit == trump_suit and rank == "Ace" and level_rank != "Ace":
+        return True
+    return False
 
 
 class StateEncoder:
-    """状态编码器"""
+    """Encode a ``state_snapshot`` dict into a 382-dim float32 observation."""
 
-    def __init__(self):
-        # 卡牌索引映射
-        self.card_to_index = self._build_card_index()
-        self.state_dim = 338  # 108*3 + 4 + 10
+    OBS_DIM = 382
 
-    def _build_card_index(self) -> dict:
-        """构建卡牌到索引的映射"""
-        index = 0
-        card_map = {}
+    def encode(self, snapshot: dict, legal_actions: list[dict] | None = None) -> np.ndarray:
+        """Return a ``(382,)`` float32 numpy array."""
+        parts: list[np.ndarray] = []
 
-        # 大小王
-        card_map[(Suit.JOKER, Rank.BIG_JOKER)] = index
-        index += 1
-        card_map[(Suit.JOKER, Rank.SMALL_JOKER)] = index
-        index += 1
+        my_hand = snapshot.get("my_hand", [])
+        trump_suit = snapshot.get("trump_suit", "NoTrump")
+        level_rank = snapshot.get("level_rank", "Two")
+        dealer = snapshot.get("dealer", 0)
+        my_seat = snapshot.get("my_seat", 0)
+        my_role = snapshot.get("my_role", "defender")
+        trick_index = snapshot.get("trick_index", 0)
+        play_position = snapshot.get("play_position", 0)
+        lead_cards = snapshot.get("lead_cards", [])
+        winning_cards = snapshot.get("current_winning_cards", [])
+        winning_player = snapshot.get("current_winning_player", -1)
+        trick_score = snapshot.get("current_trick_score", 0)
+        defender_score = snapshot.get("defender_score", 0)
+        cards_left = snapshot.get("cards_left_by_player", [25, 25, 25, 25])
 
-        # 普通牌
-        for suit in [Suit.SPADE, Suit.HEART, Suit.CLUB, Suit.DIAMOND]:
-            for rank in [Rank.ACE, Rank.KING, Rank.QUEEN, Rank.JACK,
-                        Rank.TEN, Rank.NINE, Rank.EIGHT, Rank.SEVEN,
-                        Rank.SIX, Rank.FIVE, Rank.FOUR, Rank.THREE, Rank.TWO]:
-                card_map[(suit, rank)] = index
-                index += 1
+        # 1. 自己手牌 CardCount108 (108)
+        parts.append(encode_card_count_108(my_hand))
 
-        return card_map
+        # 2. 自己角色 OneHot3 (3)
+        parts.append(encode_one_hot(_ROLE_INDEX.get(my_role, 2), 3))
 
-    def encode(self, state: GameState, player: int) -> np.ndarray:
-        """编码游戏状态
+        # 3. 自己座位 OneHot4 (4)
+        parts.append(encode_one_hot(my_seat, 4))
 
-        Args:
-            state: 游戏状态
-            player: 当前玩家
+        # 4. 庄家座位 OneHot4 (4)
+        parts.append(encode_one_hot(dealer, 4))
 
-        Returns:
-            338维特征向量
-        """
-        features = []
+        # 5. 主花色/无主 OneHot5 (5)
+        parts.append(encode_one_hot(_TRUMP_SUIT_INDEX.get(trump_suit, 4), 5))
 
-        # 1. 手牌特征（108维）
-        hand_vector = self._encode_cards(state.hands[player])
-        features.extend(hand_vector)
+        # 6. 当前级牌 OneHot13 (13)
+        parts.append(encode_one_hot(_LEVEL_RANK_INDEX.get(level_rank, 12), 13))
 
-        # 2. 已出牌特征（108维）
-        played_vector = self._encode_played_cards(state.played_tricks)
-        features.extend(played_vector)
+        # 7. 当前第几墩 NormalizedScalar (1)
+        parts.append(np.array([trick_index / 25.0], dtype=np.float32))
 
-        # 3. 当前墩特征（108维）
-        current_trick_vector = self._encode_current_trick(state.current_trick)
-        features.extend(current_trick_vector)
+        # 8. 当前出牌位置 OneHot4 (4)
+        parts.append(encode_one_hot(play_position, 4))
 
-        # 4. 角色特征（4维）
-        role_vector = self._encode_role(state, player)
-        features.extend(role_vector)
+        # 9. 当前是否首发 Scalar (1)
+        parts.append(np.array([1.0 if play_position == 0 else 0.0], dtype=np.float32))
 
-        # 5. 局面特征（10维）
-        situation_vector = self._encode_situation(state, player)
-        features.extend(situation_vector)
+        # 10. 当前墩首发牌 CardCount108 (108)
+        parts.append(encode_card_count_108(lead_cards))
 
-        return np.array(features, dtype=np.float32)
+        # 11. 当前领先牌组 CardCount108 (108)
+        parts.append(encode_card_count_108(winning_cards))
 
-    def _encode_cards(self, cards: List[Card]) -> List[float]:
-        """编码卡牌列表为108维向量"""
-        vector = [0.0] * 108
+        # 12. 当前赢家 OneHot5 (5): seats 0-3 + no winner(-1)
+        winner_idx = winning_player if 0 <= winning_player <= 3 else 4
+        parts.append(encode_one_hot(winner_idx, 5))
 
-        for card in cards:
-            key = (card.suit, card.rank)
-            if key in self.card_to_index:
-                idx = self.card_to_index[key]
-                vector[idx] += 1.0  # 计数（最多2张相同的牌）
+        # 13. 队友是否暂时领先 Scalar (1)
+        partner_seat = (my_seat + 2) % 4
+        partner_winning = 1.0 if winning_player == partner_seat else 0.0
+        # Also count as partner winning if I am winning (same team)
+        if winning_player == my_seat:
+            partner_winning = 1.0
+        parts.append(np.array([partner_winning], dtype=np.float32))
 
-        # 归一化（每张牌最多2张）
-        return [v / 2.0 for v in vector]
+        # 14. 当前墩累计分数 NormalizedScalar (1): trick_score / 100
+        parts.append(np.array([trick_score / 100.0], dtype=np.float32))
 
-    def _encode_played_cards(self, played_tricks: List[List[Tuple[int, List[Card]]]]) -> List[float]:
-        """编码已出的牌"""
-        all_played = []
-        for trick in played_tricks:
-            for _, cards in trick:
-                all_played.extend(cards)
+        # 15. 当前闲家得分 NormalizedScalar (1): defender_score / 200
+        parts.append(np.array([defender_score / 200.0], dtype=np.float32))
 
-        return self._encode_cards(all_played)
+        # 16. 各玩家剩余手牌数 PerPlayerVector (4): /25
+        cl = np.array(cards_left[:4], dtype=np.float32) / 25.0
+        parts.append(cl)
 
-    def _encode_current_trick(self, current_trick: List[Tuple[int, List[Card]]]) -> List[float]:
-        """编码当前墩"""
-        current_cards = []
-        for _, cards in current_trick:
-            current_cards.extend(cards)
+        # ── Hand structure statistics (items 17-24) ──
+        trump_count = 0
+        high_trump_count = 0
+        joker_count = 0
+        level_card_count = 0
+        score_card_count = 0
+        suit_lengths = [0, 0, 0, 0]  # Spade, Heart, Club, Diamond (non-trump only)
 
-        return self._encode_cards(current_cards)
+        # Count per-face for pair/tractor detection in trump
+        trump_face_counts: dict[int, int] = {}
 
-    def _encode_role(self, state: GameState, player: int) -> List[float]:
-        """编码角色特征"""
-        is_dealer = 1.0 if player == state.dealer else 0.0
-        is_dealer_partner = 1.0 if (player + 2) % 4 == state.dealer else 0.0
-        is_defender = 1.0 if player not in [state.dealer, (state.dealer + 2) % 4] else 0.0
-        is_my_turn = 1.0 if player == state.current_player else 0.0
-
-        return [is_dealer, is_dealer_partner, is_defender, is_my_turn]
-
-    def _encode_situation(self, state: GameState, player: int) -> List[float]:
-        """编码局面特征"""
-        # 分数（归一化到[0,1]）
-        dealer_score_norm = state.dealer_score / 200.0
-        defender_score_norm = state.defender_score / 200.0
-
-        # 剩余墩数
-        tricks_remaining_norm = state.tricks_remaining / 25.0
-
-        # 当前墩信息
-        my_team_winning = 0.0
-        partner_winning = 0.0
-        if len(state.current_trick) > 0:
-            # 简化：假设第一家赢
-            winner = state.current_trick[0][0]
-            if winner in [state.dealer, (state.dealer + 2) % 4]:
-                my_team_winning = 1.0 if player in [state.dealer, (state.dealer + 2) % 4] else 0.0
+        for c in my_hand:
+            is_trump = _is_trump_card(c, trump_suit, level_rank)
+            if is_trump:
+                trump_count += 1
+                fi = card_face_index(c)
+                trump_face_counts[fi] = trump_face_counts.get(fi, 0) + 1
+                if _is_high_trump(c, trump_suit, level_rank):
+                    high_trump_count += 1
             else:
-                my_team_winning = 1.0 if player not in [state.dealer, (state.dealer + 2) % 4] else 0.0
+                s = c.get("suit", "")
+                if s in _SUIT_INDEX:
+                    suit_lengths[_SUIT_INDEX[s]] += 1
 
-            # 队友是否赢
-            partner = (player + 2) % 4
-            partner_winning = 1.0 if winner == partner else 0.0
+            rank_str = c.get("rank", "")
+            if rank_str in ("BigJoker", "SmallJoker"):
+                joker_count += 1
+            if rank_str == level_rank:
+                level_card_count += 1
+            if rank_str in _RANK_SCORE:
+                score_card_count += 1
 
-        # 是否先手
-        is_leading = 1.0 if len(state.current_trick) == 0 else 0.0
+        # Trump pairs and tractors
+        trump_pair_count = sum(1 for v in trump_face_counts.values() if v >= 2)
+        trump_tractor_count = self._count_trump_tractors(
+            trump_face_counts, trump_suit, level_rank
+        )
 
-        # 主花色编码（one-hot，4维）
-        trump_encoding = [0.0] * 4
-        if state.trump_suit:
-            trump_encoding[state.trump_suit.value % 4] = 1.0
+        # 17. 主牌数量 NormalizedScalar (1): /25
+        parts.append(np.array([trump_count / 25.0], dtype=np.float32))
 
-        return [
-            dealer_score_norm,
-            defender_score_norm,
-            tricks_remaining_norm,
-            my_team_winning,
-            partner_winning,
-            is_leading,
-        ] + trump_encoding
+        # 18. 高主数量 NormalizedScalar (1): /8
+        parts.append(np.array([high_trump_count / 8.0], dtype=np.float32))
 
+        # 19. 王数量 Scalar (1)
+        parts.append(np.array([float(joker_count)], dtype=np.float32))
 
-class ActionEncoder:
-    """动作编码器"""
+        # 20. 级牌数量 Scalar (1)
+        parts.append(np.array([float(level_card_count)], dtype=np.float32))
 
-    def __init__(self):
-        self.card_to_index = StateEncoder()._build_card_index()
+        # 21. 主牌对子数量 Scalar (1)
+        parts.append(np.array([float(trump_pair_count)], dtype=np.float32))
 
-    def encode_action(self, action: List[Card]) -> np.ndarray:
-        """编码动作为108维向量"""
-        vector = [0.0] * 108
+        # 22. 主牌拖拉机数量 Scalar (1)
+        parts.append(np.array([float(trump_tractor_count)], dtype=np.float32))
 
-        for card in action:
-            key = (card.suit, card.rank)
-            if key in self.card_to_index:
-                idx = self.card_to_index[key]
-                vector[idx] += 1.0
+        # 23. 各花色长度 PerSuitVector (4)
+        parts.append(np.array(suit_lengths, dtype=np.float32))
 
-        return np.array(vector, dtype=np.float32)
+        # 24. 手牌分牌数量 Scalar (1)
+        parts.append(np.array([float(score_card_count)], dtype=np.float32))
 
-    def encode_action_mask(self, legal_actions: List[List[Card]]) -> np.ndarray:
-        """编码合法动作掩码
+        obs = np.concatenate(parts)
+        assert obs.shape == (self.OBS_DIM,), (
+            f"Observation dim mismatch: expected {self.OBS_DIM}, got {obs.shape[0]}"
+        )
+        return obs
 
-        Returns:
-            108维布尔向量，True表示该动作合法
+    # ── private helpers ──
+
+    @staticmethod
+    def _count_trump_tractors(
+        face_counts: dict[int, int], trump_suit: str, level_rank: str
+    ) -> int:
+        """Count the number of trump tractors (consecutive pairs) in hand.
+
+        This is a simplified heuristic: we look for runs of >= 2 consecutive
+        paired trump faces in the standard trump ordering.
         """
-        mask = np.zeros(108, dtype=bool)
+        if len(face_counts) < 2:
+            return 0
 
-        for action in legal_actions:
-            # 简化：只标记第一张牌的位置
-            if len(action) > 0:
-                card = action[0]
-                key = (card.suit, card.rank)
-                if key in self.card_to_index:
-                    idx = self.card_to_index[key]
-                    mask[idx] = True
+        # Build the ordered list of trump face indices that have pairs
+        paired_faces = sorted(fi for fi, cnt in face_counts.items() if cnt >= 2)
+        if len(paired_faces) < 2:
+            return 0
 
-        return mask
-
-    def decode_action(self, action_index: int, legal_actions: List[List[Card]]) -> List[Card]:
-        """从动作索引解码为实际动作
-
-        简化版：action_index对应legal_actions的索引
-        """
-        if 0 <= action_index < len(legal_actions):
-            return legal_actions[action_index]
-        return legal_actions[0] if legal_actions else []
-
-
-if __name__ == '__main__':
-    # 测试
-    from game_engine import TractorGame
-
-    game = TractorGame(seed=42)
-    game.state.phase = game_engine.GamePhase.PLAYING
-
-    encoder = StateEncoder()
-    state_vector = encoder.encode(game.state, player=0)
-
-    print(f"状态向量维度: {len(state_vector)}")
-    print(f"状态向量前10维: {state_vector[:10]}")
-
-    # 测试动作编码
-    action_encoder = ActionEncoder()
-    actions = game.get_legal_actions(0)
-    if actions:
-        action_vector = action_encoder.encode_action(actions[0])
-        print(f"动作向量维度: {len(action_vector)}")
-        print(f"动作向量非零元素: {np.sum(action_vector > 0)}")
+        # For simplicity, count runs of consecutive face indices as tractors.
+        # This is an approximation — the real tractor logic accounts for
+        # level-rank gaps in the trump sequence, but for an observation
+        # feature this is sufficient.
+        tractor_count = 0
+        run_len = 1
+        for i in range(1, len(paired_faces)):
+            if paired_faces[i] == paired_faces[i - 1] + 1:
+                run_len += 1
+            else:
+                if run_len >= 2:
+                    tractor_count += run_len - 1
+                run_len = 1
+        if run_len >= 2:
+            tractor_count += run_len - 1
+        return tractor_count

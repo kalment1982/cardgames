@@ -29,6 +29,9 @@ namespace TractorGame.Core.AI.V21
             if (ShouldUseSecurityFloorOrdering(context, intent))
                 return OrderWithSecurityFloor(context, intent, scored);
 
+            if (ShouldUsePassToMateOrdering(context, intent))
+                return OrderForPassToMate(scored);
+
             return scored
                 .OrderByDescending(action => action.Score)
                 .ThenBy(action => RuleAIUtility.BuildCandidateKey(action.Cards), StringComparer.Ordinal)
@@ -447,7 +450,14 @@ namespace TractorGame.Core.AI.V21
             return context.Phase == PhaseKind.Follow &&
                 (intent.PrimaryIntent == DecisionIntentKind.TakeScore ||
                  intent.PrimaryIntent == DecisionIntentKind.ProtectBottom ||
-                 intent.PrimaryIntent == DecisionIntentKind.PrepareEndgame);
+                 intent.PrimaryIntent == DecisionIntentKind.PrepareEndgame ||
+                 intent.Mode == "ProtectMateTrumpControl");
+        }
+
+        private bool ShouldUsePassToMateOrdering(RuleAIContext context, ResolvedIntent intent)
+        {
+            return context.Phase == PhaseKind.Follow &&
+                intent.PrimaryIntent == DecisionIntentKind.PassToMate;
         }
 
         private List<ScoredAction> OrderWithSecurityFloor(
@@ -459,11 +469,34 @@ namespace TractorGame.Core.AI.V21
             bool hasFloorCandidate = scored.Any(action =>
                 action.Features.GetValueOrDefault("TrickWinValue") > 0 &&
                 action.Features.GetValueOrDefault("WinSecurityValue") >= requiredSecurityFloor);
+            bool preferCheapestSecureWin =
+                hasFloorCandidate &&
+                ((context.TrickScore <= 5 &&
+                  (intent.PrimaryIntent == DecisionIntentKind.ProtectBottom ||
+                   intent.PrimaryIntent == DecisionIntentKind.PrepareEndgame)) ||
+                 (intent.PrimaryIntent == DecisionIntentKind.TakeScore &&
+                  (context.CurrentWinningCards.Count > 1 || context.LeadCards.Count > 1)));
             bool preferHigherMarginToProtectMate =
                 context.PartnerWinning &&
                 context.TrickScore >= 5 &&
                 _followThreatAnalyzer.CountOpponentsBehind(context) > 0 &&
                 !hasFloorCandidate;
+
+            if (preferCheapestSecureWin)
+            {
+                bool takeScore = intent.PrimaryIntent == DecisionIntentKind.TakeScore;
+                return scored
+                    .OrderByDescending(action => action.Features.GetValueOrDefault("TrickWinValue") > 0 ? 1 : 0)
+                    .ThenByDescending(action => ResolveSecurityBucket(action, hasFloorCandidate, requiredSecurityFloor))
+                    .ThenBy(action => takeScore ? action.Features.GetValueOrDefault("DiscardPointCost") : ResolveControlSpendCost(action))
+                    .ThenBy(action => takeScore ? ResolveControlSpendCost(action) : action.Features.GetValueOrDefault("DiscardPointCost"))
+                    .ThenBy(action => action.Features.GetValueOrDefault("FuturePointRisk"))
+                    .ThenBy(action => action.Features.GetValueOrDefault("StructureBreakCost"))
+                    .ThenByDescending(action => action.Features.GetValueOrDefault("PointProtectionValue"))
+                    .ThenByDescending(action => action.Score)
+                    .ThenBy(action => RuleAIUtility.BuildCandidateKey(action.Cards), StringComparer.Ordinal)
+                    .ToList();
+            }
 
             return scored
                 .OrderByDescending(action => action.Features.GetValueOrDefault("TrickWinValue") > 0 ? 1 : 0)
@@ -480,8 +513,27 @@ namespace TractorGame.Core.AI.V21
                 .ToList();
         }
 
+        private List<ScoredAction> OrderForPassToMate(List<ScoredAction> scored)
+        {
+            return scored
+                .OrderBy(action => action.Features.GetValueOrDefault("TrickWinValue") > 0 ? 1 : 0)
+                .ThenByDescending(action => action.Features.GetValueOrDefault("MateSyncValue"))
+                .ThenBy(action => action.Features.GetValueOrDefault("DiscardPointCost"))
+                .ThenBy(action => action.Features.GetValueOrDefault("TrumpConsumptionCost"))
+                .ThenBy(action => action.Features.GetValueOrDefault("HighControlLossCost"))
+                .ThenBy(action => action.Features.GetValueOrDefault("DiscardRankCost"))
+                .ThenBy(action => action.Features.GetValueOrDefault("InfoLeakCost"))
+                .ThenBy(action => action.Features.GetValueOrDefault("StructureBreakCost"))
+                .ThenByDescending(action => action.Score)
+                .ThenBy(action => RuleAIUtility.BuildCandidateKey(action.Cards), StringComparer.Ordinal)
+                .ToList();
+        }
+
         private double ResolveRequiredSecurityFloor(RuleAIContext context, ResolvedIntent intent)
         {
+            if (intent.Mode == "ProtectMateTrumpControl")
+                return (double)WinSecurityLevel.Lock;
+
             if (intent.PrimaryIntent == DecisionIntentKind.ProtectBottom ||
                 intent.PrimaryIntent == DecisionIntentKind.PrepareEndgame)
             {

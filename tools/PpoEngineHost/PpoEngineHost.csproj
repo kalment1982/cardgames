@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="JsonProtocol.cs" />
+    <Compile Include="EnvironmentManager.cs" />
+    <Compile Include="EnvironmentSession.cs" />
+    <Compile Include="StateSnapshotBuilder.cs" />
+    <Compile Include="LegalAction.cs" />
+    <Compile Include="LegalActionExporter.cs" />
+    <Compile Include="ActionSlotMapper.cs" />
+    <Compile Include="../../src/Core/**/*.cs" />
+  </ItemGroup>
+</Project>

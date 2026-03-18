@@ -47,8 +47,8 @@ namespace TractorGame.Tests
             summary.AppendLine();
             summary.AppendLine("| 队伍 | 玩家 | 座位 |");
             summary.AppendLine("|------|------|------|");
-            summary.AppendLine("| 🔴 红队 | 玩家0 + 玩家2 | 南 + 北 |");
-            summary.AppendLine("| 🔵 蓝队 | 玩家1 + 玩家3 | 东 + 西 |");
+            summary.AppendLine("| 🔴 红队 | 南家 + 北家 | 南 + 北 |");
+            summary.AppendLine("| 🔵 蓝队 | 东家 + 西家 | 东 + 西 |");
             summary.AppendLine();
             summary.AppendLine("## 升级规则");
             summary.AppendLine();
@@ -103,7 +103,7 @@ namespace TractorGame.Tests
                 md.AppendLine();
                 md.AppendLine($"| 项目 | 内容 |");
                 md.AppendLine($"|------|------|");
-                md.AppendLine($"| 庄家 | 玩家{dealerIndex}（{TeamName(dealerTeam)}） |");
+                md.AppendLine($"| 庄家 | {PlayerWithTeam(dealerIndex)}（{TeamName(dealerTeam)}） |");
                 md.AppendLine($"| 本局打 | **{RankName(levelRank)}** |");
                 md.AppendLine($"| 主花色 | {SuitName(trumpSuit)} |");
                 md.AppendLine($"| 红队当前级别 | {RankName((Rank)teamLevel[0])} |");
@@ -120,10 +120,10 @@ namespace TractorGame.Tests
                     var sorted = hands[p].OrderByDescending(c => c, comparer).ToList();
                     string team = (p % 2 == 0) ? "🔴红队" : "🔵蓝队";
                     string role = (p % 2 == dealerIndex % 2) ? "庄" : "闲";
-                    md.AppendLine($"| 玩家{p}（{SeatName(p)}） | {team} | {role} | {CardsToString(sorted)} |");
+                    md.AppendLine($"| {PlayerName(p)} | {team} | {role} | {CardsToString(sorted)} |");
                 }
                 md.AppendLine();
-                md.AppendLine($"**底牌（庄家玩家{dealerIndex}扣入）：** {CardsToString(buried)}");
+                md.AppendLine($"**底牌（庄家{PlayerName(dealerIndex)}扣入）：** {CardsToString(buried)}");
                 md.AppendLine();
 
                 // ── 出牌阶段 ────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ namespace TractorGame.Tests
                     // ── 出牌前手牌快照 ──────────────────────────────────────────
                     md.AppendLine($"### 第 {trickNum} 墩");
                     md.AppendLine();
-                    md.AppendLine($"**首家：玩家{currentLeader}（{TeamName(currentLeader % 2 == 0 ? 0 : 1)}·{SeatTag(currentLeader, dealerIndex)}）**");
+                    md.AppendLine($"**首家：{PlayerWithTeamAndRole(currentLeader, dealerIndex)}**");
                     md.AppendLine();
                     md.AppendLine("**出牌前各家手牌：**");
                     md.AppendLine();
@@ -154,7 +154,7 @@ namespace TractorGame.Tests
                         int p = (currentLeader + seat) % 4;
                         var sorted = hands[p].OrderByDescending(c => c, comparer).ToList();
                         string role = SeatTag(p, dealerIndex);
-                        md.AppendLine($"| 玩家{p}（{SeatName(p)}·{role}） | {CardsToString(sorted)} |");
+                        md.AppendLine($"| {PlayerWithRole(p, role)} | {CardsToString(sorted)} |");
                     }
                     md.AppendLine();
 
@@ -196,7 +196,7 @@ namespace TractorGame.Tests
                         string role = SeatTag(p, dealerIndex);
                         string note = (p == winner) ? "🏆 **赢墩**" : "";
                         if (i == 0) note = (p == winner ? "🏆 **赢墩** · 首家" : "首家");
-                        md.AppendLine($"| {i + 1} | 玩家{p}（{SeatName(p)}） | {team} | {role} | **{CardName(card)}** | {note} |");
+                        md.AppendLine($"| {i + 1} | {PlayerName(p)} | {team} | {role} | **{CardName(card)}** | {note} |");
                     }
                     md.AppendLine();
 
@@ -205,7 +205,7 @@ namespace TractorGame.Tests
                         : "本墩无分牌";
                     string winnerTeam = (winner % 2 == 0) ? "🔴红队" : "🔵蓝队";
                     string winnerRole = SeatTag(winner, dealerIndex);
-                    md.AppendLine($"> **结果：** 玩家{winner}（{winnerTeam}·{winnerRole}）赢得本墩。{scoreNote}");
+                    md.AppendLine($"> **结果：** {PlayerName(winner)}（{winnerTeam}·{winnerRole}）赢得本墩。{scoreNote}");
                     if (defenderWon && trickScore > 0)
                         md.AppendLine($"> 闲家累计得分：**{defenderScore} 分**");
                     md.AppendLine();
@@ -244,7 +244,7 @@ namespace TractorGame.Tests
                 if (result.NextDealer == "庄家")
                 {
                     teamLevel[dealerTeam] = (int)result.NextLevel;
-                    dealerIndex = (dealerIndex + 2) % 4;
+                    dealerIndex = dealerIndex;
                 }
                 else
                 {
@@ -258,7 +258,7 @@ namespace TractorGame.Tests
                 md.AppendLine();
                 md.AppendLine("| 项目 | 内容 |");
                 md.AppendLine("|------|------|");
-                md.AppendLine($"| 新庄家 | 玩家{dealerIndex}（{TeamName(dealerTeam)}） |");
+                md.AppendLine($"| 新庄家 | {PlayerWithTeam(dealerIndex)}（{TeamName(dealerTeam)}） |");
                 md.AppendLine($"| 🔴 红队级别 | {RankName((Rank)teamLevel[0])} |");
                 md.AppendLine($"| 🔵 蓝队级别 | {RankName((Rank)teamLevel[1])} |");
                 md.AppendLine();
@@ -268,7 +268,7 @@ namespace TractorGame.Tests
                 File.WriteAllText(roundFile, md.ToString(), Encoding.UTF8);
 
                 // 追加总览行（使用本局开始时保存的庄家信息）
-                summary.AppendLine($"| {roundNumber} | 玩家{prevDealerIndex}（{TeamName(prevDealerTeam)}） | {RankName(levelRank)} | {SuitName(trumpSuit)} | {defenderScore} | {result.Winner} | +{result.LevelChange} | {RankName((Rank)teamLevel[0])} | {RankName((Rank)teamLevel[1])} |");
+                summary.AppendLine($"| {roundNumber} | {PlayerWithTeam(prevDealerIndex)}（{TeamName(prevDealerTeam)}） | {RankName(levelRank)} | {SuitName(trumpSuit)} | {defenderScore} | {result.Winner} | +{result.LevelChange} | {RankName((Rank)teamLevel[0])} | {RankName((Rank)teamLevel[1])} |");
 
                 // ── 通关检测 ─────────────────────────────────────────────────────
                 for (int t = 0; t < 2; t++)
@@ -349,6 +349,15 @@ namespace TractorGame.Tests
         }
 
         private static string TeamName(int team) => team == 0 ? "🔴红队" : "🔵蓝队";
+
+        private static string PlayerName(int player) => $"{SeatName(player)}家";
+
+        private static string PlayerWithTeam(int player) => $"{PlayerName(player)}";
+
+        private static string PlayerWithRole(int player, string role) => $"{PlayerName(player)}·{role}";
+
+        private static string PlayerWithTeamAndRole(int player, int dealerIndex)
+            => $"{PlayerName(player)}（{TeamName(player % 2 == 0 ? 0 : 1)}·{SeatTag(player, dealerIndex)}）";
 
         private static string SeatName(int player) => player switch
         {

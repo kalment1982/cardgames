@@ -212,7 +212,7 @@ namespace TractorGame.Tests
             Assert.Equal(new Card(Suit.Heart, Rank.Seven), game.CurrentTrick[0].Cards[0]);
             Assert.Equal(5, game.State.PlayerHands[0].Count);
             Assert.Contains(new Card(Suit.Heart, Rank.Ten), game.State.PlayerHands[0]);
-            Assert.Equal(1, game.State.CurrentPlayer);
+            Assert.Equal(3, game.State.CurrentPlayer);
         }
 
         [Fact]
@@ -265,7 +265,7 @@ namespace TractorGame.Tests
             Assert.Equal(new Card(Suit.Heart, Rank.Queen), game.CurrentTrick[0].Cards[0]);
             Assert.Equal(4, game.State.PlayerHands[0].Count);
             Assert.Contains(new Card(Suit.Heart, Rank.Ten), game.State.PlayerHands[0]);
-            Assert.Equal(1, game.State.CurrentPlayer);
+            Assert.Equal(3, game.State.CurrentPlayer);
         }
 
         [Fact]
@@ -323,7 +323,7 @@ namespace TractorGame.Tests
             Assert.Equal(4, game.State.PlayerHands[0].Count);
             Assert.Contains(new Card(Suit.Heart, Rank.King), game.State.PlayerHands[0]);
             Assert.Contains(new Card(Suit.Heart, Rank.Queen), game.State.PlayerHands[0]);
-            Assert.Equal(1, game.State.CurrentPlayer);
+            Assert.Equal(3, game.State.CurrentPlayer);
         }
 
         private static void DealToEnd(Game game)

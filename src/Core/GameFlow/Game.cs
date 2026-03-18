@@ -25,6 +25,7 @@ namespace TractorGame.Core.GameFlow
         private readonly IGameLogger _logger;
         private readonly Stopwatch _roundTimer;
         private readonly int _seed;
+        private readonly bool _bidWinnerBecomesDealer;
         private readonly string _sessionId;
         private readonly string _gameId;
         private readonly string _roundId;
@@ -60,12 +61,14 @@ namespace TractorGame.Core.GameFlow
         public Game(
             int seed = 0,
             IGameLogger? logger = null,
+            bool bidWinnerBecomesDealer = false,
             string? sessionId = null,
             string? gameId = null,
             string? roundId = null)
         {
             _seed = seed;
             _logger = logger ?? GameLoggerFactory.CreateDefault();
+            _bidWinnerBecomesDealer = bidWinnerBecomesDealer;
             _sessionId = sessionId ?? GenerateId("sess");
             _gameId = gameId ?? GenerateId("game");
             _roundId = roundId ?? GenerateId("round");
@@ -260,13 +263,16 @@ namespace TractorGame.Core.GameFlow
             if (!IsDealingComplete)
                 return OperationResult.Fail(ReasonCodes.DealingNotComplete);
 
+            if (_bidWinnerBecomesDealer && _bidding != null && _bidding.TrumpPlayer >= 0)
+                _state.DealerIndex = _bidding.TrumpPlayer;
+
             if (trumpSuit.HasValue)
             {
-                _state.TrumpSuit = trumpSuit;
+                _state.TrumpSuit = trumpSuit == Suit.Joker ? null : trumpSuit;
             }
             else if (_bidding != null && _bidding.TrumpSuit.HasValue)
             {
-                _state.TrumpSuit = _bidding.TrumpSuit;
+                _state.TrumpSuit = _bidding.TrumpSuit == Suit.Joker ? null : _bidding.TrumpSuit;
             }
             else
             {
@@ -289,9 +295,9 @@ namespace TractorGame.Core.GameFlow
                 "system",
                 new Dictionary<string, object?>
                 {
-                    ["trump_suit"] = _state.TrumpSuit?.ToString() ?? Suit.Spade.ToString(),
+                    ["trump_suit"] = _state.TrumpSuit?.ToString() ?? "NoTrump",
                     ["trump_player"] = _bidding?.TrumpPlayer ?? _state.DealerIndex,
-                    ["is_no_trump"] = false
+                    ["is_no_trump"] = !_state.TrumpSuit.HasValue
                 });
 
             var from = _state.Phase;

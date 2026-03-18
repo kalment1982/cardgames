@@ -7,6 +7,7 @@ var app = builder.Build();
 
 var repoRoot = ResolveRepoRoot();
 var staticRoot = Path.Combine(repoRoot, "WebUI", "wwwroot");
+var cardAssetRoot = Path.Combine(repoRoot, "assets", "playingcardshl");
 if (!Directory.Exists(staticRoot))
 {
     throw new DirectoryNotFoundException($"WebUI static files not found: {staticRoot}. Build WebUI first.");
@@ -44,6 +45,15 @@ app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = fileProvider
 });
+
+if (Directory.Exists(cardAssetRoot))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(cardAssetRoot),
+        RequestPath = "/assets/playingcardshl"
+    });
+}
 
 if (Directory.Exists(frameworkRoot))
 {

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TractorGame.Core.GameFlow;
 using TractorGame.Core.AI.Bidding;
 using TractorGame.Core.Models;
 using Xunit;
@@ -111,6 +112,108 @@ namespace TractorGame.Tests
             var attempt = policy.SelectBidAttempt(context);
 
             Assert.Empty(attempt);
+        }
+
+        [Fact]
+        public void SelectBidAttempt_WhenPairSmallJokersCanOvertakePair_ReturnsNoTrumpPair()
+        {
+            var policy = new BidPolicy(seed: 13);
+            var context = new BidPolicy.DecisionContext
+            {
+                PlayerIndex = 0,
+                DealerIndex = 1,
+                LevelRank = Rank.Seven,
+                RoundIndex = 12,
+                CurrentBidPriority = 1,
+                CurrentBidPlayer = 2,
+                VisibleCards = new List<Card>
+                {
+                    new Card(Suit.Joker, Rank.SmallJoker),
+                    new Card(Suit.Joker, Rank.SmallJoker),
+                    new Card(Suit.Heart, Rank.Seven),
+                    new Card(Suit.Spade, Rank.Seven),
+                    new Card(Suit.Heart, Rank.Ace),
+                    new Card(Suit.Club, Rank.King)
+                }
+            };
+
+            var decision = policy.Decide(context);
+
+            Assert.Equal(2, decision.AttemptCards.Count);
+            Assert.All(decision.AttemptCards, card =>
+            {
+                Assert.True(card.IsJoker);
+                Assert.Equal(Rank.SmallJoker, card.Rank);
+            });
+            Assert.Equal("Joker", decision.CandidateSuit);
+            Assert.True(decision.CandidatePriority >= 2);
+        }
+
+        [Fact]
+        public void AutoBiddingFlow_FindsSeedWhereAiBidsNoTrump()
+        {
+            for (var seed = 1; seed <= 2000; seed++)
+            {
+                var game = new Game(seed);
+                game.StartGame();
+                RunAutoBidding(game, seed);
+                if (game.CurrentBidSuit != Suit.Joker)
+                    continue;
+
+                var finalize = game.FinalizeTrumpEx();
+                Assert.True(finalize.Success);
+                Assert.Null(game.State.TrumpSuit);
+                Assert.InRange(game.State.DealerIndex, 0, 3);
+                return;
+            }
+
+            Assert.True(false, "No seed in [1,2000] produced an AI no-trump bid.");
+        }
+
+        private static void RunAutoBidding(Game game, int seed)
+        {
+            var bidPolicy = new BidPolicy(seed + 5003);
+            var visibleHands = new[] { new List<Card>(), new List<Card>(), new List<Card>(), new List<Card>() };
+
+            while (!game.IsDealingComplete)
+            {
+                var dealResult = game.DealNextCardEx();
+                if (!dealResult.Success)
+                    break;
+
+                var step = game.LastDealStep;
+                if (step == null || step.IsBottomCard)
+                    continue;
+
+                var player = step.PlayerIndex;
+                if (player < 0 || player >= 4)
+                    continue;
+
+                visibleHands[player].Add(step.Card);
+                var decision = bidPolicy.Decide(new BidPolicy.DecisionContext
+                {
+                    PlayerIndex = player,
+                    DealerIndex = game.State.DealerIndex,
+                    LevelRank = game.State.LevelRank,
+                    VisibleCards = new List<Card>(visibleHands[player]),
+                    RoundIndex = step.PlayerCardCount - 1,
+                    CurrentBidPriority = game.CurrentBidPriority,
+                    CurrentBidPlayer = game.CurrentBidPlayer
+                });
+
+                var bidCards = decision.AttemptCards;
+                if (bidCards.Count == 0)
+                    continue;
+
+                var detail = decision.ToLogDetail();
+                var bidResult = game.BidTrumpEx(player, bidCards, detail);
+                if (!bidResult.Success && bidCards.Count > 1)
+                {
+                    var single = new List<Card> { bidCards[0] };
+                    if (game.CanBidTrumpEx(player, single).Success)
+                        game.BidTrumpEx(player, single, detail);
+                }
+            }
         }
     }
 }
