@@ -1,4 +1,6 @@
 using TractorGame.Core.GameFlow;
+using TractorGame.Core.AI;
+using TractorGame.Core.AI.V21;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
 
@@ -29,6 +31,28 @@ public static class LegalActionExporter
         return isLead
             ? ExportLeadActions(game, playerIndex, hand, config)
             : ExportFollowActions(game, playerIndex, hand, config);
+    }
+
+    public static LegalAction CreateForCurrentState(Game game, int playerIndex, List<Card> cards)
+    {
+        var config = new GameConfig
+        {
+            LevelRank = game.State.LevelRank,
+            TrumpSuit = game.State.TrumpSuit
+        };
+
+        bool isLead = game.CurrentTrick.Count == 0;
+        if (isLead)
+        {
+            return BuildLegalAction(cards, config, isLead: true, isFollow: false,
+                leadCards: null, leadCategory: null, leadSuit: null);
+        }
+
+        var leadCards = game.CurrentTrick[0].Cards;
+        var leadCategory = config.GetCardCategory(leadCards[0]);
+        var leadSuit = leadCards[0].Suit;
+        return BuildLegalAction(cards, config, isLead: false, isFollow: true,
+            leadCards: leadCards, leadCategory: leadCategory, leadSuit: leadSuit);
     }
 
     // ─── Lead: enumerate every legal first-play ───
@@ -84,7 +108,7 @@ public static class LegalActionExporter
             // Throws (mixed): all multi-card same-system combos that aren't
             // single/pair/tractor. We enumerate subsets of the group's structural
             // components (singles + pairs + tractors) with >= 2 components.
-            AddThrowCandidates(rawCandidates, group, config, comparer);
+            AddThrowCandidates(rawCandidates, group);
         }
 
         // Deduplicate and validate
@@ -113,89 +137,15 @@ public static class LegalActionExporter
     /// components (singles, pairs, tractors) and combining 2+ components.
     /// </summary>
     private static void AddThrowCandidates(
-        List<List<Card>> candidates, List<Card> group,
-        GameConfig config, CardComparer comparer)
+        List<List<Card>> candidates, List<Card> group)
     {
         if (group.Count < 3)
             return;
 
-        // Build atomic components: tractors first, then remaining pairs, then singles
-        var components = new List<List<Card>>();
-        var remaining = new List<Card>(group);
-
-        // Find all maximal tractors greedily (longest first)
-        var pairGroups = remaining.GroupBy(c => c).Where(g => g.Count() >= 2).ToList();
-        var pairReps = pairGroups.Select(g => g.Key).OrderBy(c => c, comparer).ToList();
-
-        // Extract tractors from longest to shortest
-        var usedPairReps = new HashSet<string>();
-        for (int len = pairReps.Count; len >= 2; len--)
-        {
-            for (int start = 0; start <= pairReps.Count - len; start++)
-            {
-                var slice = pairReps.Skip(start).Take(len).ToList();
-                if (slice.Any(c => usedPairReps.Contains(CardKey(c))))
-                    continue;
-
-                var tractorCards = new List<Card>();
-                foreach (var c in slice) { tractorCards.Add(c); tractorCards.Add(c); }
-
-                if (!new CardPattern(tractorCards, config).IsTractor(tractorCards))
-                    continue;
-
-                components.Add(tractorCards);
-                foreach (var c in slice) usedPairReps.Add(CardKey(c));
-            }
-        }
-
-        // Remaining pairs (not consumed by tractors)
-        foreach (var pg in pairGroups)
-        {
-            if (usedPairReps.Contains(CardKey(pg.Key)))
-                continue;
-            components.Add(pg.Take(2).ToList());
-            usedPairReps.Add(CardKey(pg.Key));
-        }
-
-        // Singles (cards with odd count, or not part of any pair)
-        var countMap = group.GroupBy(c => c).ToDictionary(g => g.Key, g => g.Count());
-        foreach (var entry in countMap)
-        {
-            int pairsUsed = usedPairReps.Contains(CardKey(entry.Key)) ? 1 : 0;
-            int leftover = entry.Value - pairsUsed * 2;
-            for (int i = 0; i < leftover; i++)
-                components.Add(new List<Card> { entry.Key });
-        }
-
-        if (components.Count < 2)
-            return;
-
-        // Cap enumeration to avoid combinatorial explosion
-        int maxComponents = Math.Min(components.Count, 12);
-        var cappedComponents = components.Take(maxComponents).ToList();
-
-        // Enumerate all subsets of size >= 2
-        int limit = 1 << cappedComponents.Count;
-        for (int mask = 3; mask < limit; mask++)
-        {
-            if (CountBits(mask) < 2)
-                continue;
-
-            var combo = new List<Card>();
-            for (int i = 0; i < cappedComponents.Count; i++)
-            {
-                if ((mask & (1 << i)) != 0)
-                    combo.AddRange(cappedComponents[i]);
-            }
-
-            // Must be >= 3 cards to be a throw
-            if (combo.Count >= 3)
-                candidates.Add(combo);
-        }
-
-        // Also add the full group if it has >= 3 cards
-        if (group.Count >= 3)
-            candidates.Add(new List<Card>(group));
+        // Phase 1 bounded canonical export:
+        // export only the full same-system group as the canonical complex action.
+        // Singles, pairs, and tractors remain exhaustively exported elsewhere.
+        candidates.Add(new List<Card>(group));
     }
 
     // ─── Follow: enumerate every legal follow-play ───
@@ -220,39 +170,42 @@ public static class LegalActionExporter
             return new List<LegalAction> { action };
         }
 
-        // Enumerate all C(hand.Count, need) combinations, validate each.
-        // Group identical cards to reduce combinatorial space.
-        var cardGroups = hand
-            .GroupBy(c => c)
-            .Select(g => new { Card = g.Key, Count = g.Count() })
-            .OrderByDescending(g => g.Count)
-            .ThenBy(g => g.Card, comparer)
-            .ToList();
-
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var results = new List<LegalAction>();
+        var fixedSlotActions = new List<LegalAction>();
+        var complexActions = new List<LegalAction>();
 
-        // Use grouped enumeration to avoid duplicate combos from identical cards
-        EnumerateGroupedCombinations(
-            cardGroups.Select(g => (g.Card, g.Count)).ToList(),
-            need,
-            0,
-            new List<Card>(),
-            combo =>
-            {
-                var key = BuildCandidateKey(combo);
-                if (!seen.Add(key))
-                    return;
+        void TryAddCandidate(List<Card> candidate)
+        {
+            var key = BuildCandidateKey(candidate);
+            if (!seen.Add(key))
+                return;
 
-                if (!followValidator.IsValidFollow(hand, leadCards, combo))
-                    return;
+            if (!followValidator.IsValidFollow(hand, leadCards, candidate))
+                return;
 
-                results.Add(BuildLegalAction(combo, config,
-                    isLead: false, isFollow: true,
-                    leadCards: leadCards, leadCategory: leadCategory, leadSuit: leadSuit));
-            });
+            var action = BuildLegalAction(candidate, config,
+                isLead: false, isFollow: true,
+                leadCards: leadCards, leadCategory: leadCategory, leadSuit: leadSuit);
 
-        return results;
+            if (ActionSlotMapper.MapToSlot(action, config) == -1)
+                complexActions.Add(action);
+            else
+                fixedSlotActions.Add(action);
+        }
+
+        AddExhaustiveFixedSlotFollowCandidates(hand, need, config, comparer, TryAddCandidate);
+
+        foreach (var candidate in BuildCanonicalFollowCandidates(game, playerIndex, hand, leadCards, config))
+            TryAddCandidate(candidate);
+
+        if (fixedSlotActions.Count == 0 && complexActions.Count == 0 &&
+            LegalPlayResolver.TryResolve(game, playerIndex, config, out var fallback))
+        {
+            TryAddCandidate(fallback);
+        }
+
+        fixedSlotActions.AddRange(SelectCanonicalComplexActions(complexActions, config));
+        return fixedSlotActions;
     }
 
     /// <summary>
@@ -296,6 +249,133 @@ public static class LegalActionExporter
             for (int j = 0; j < take; j++)
                 current.RemoveAt(current.Count - 1);
         }
+    }
+
+    private static void AddExhaustiveFixedSlotFollowCandidates(
+        List<Card> hand,
+        int need,
+        GameConfig config,
+        CardComparer comparer,
+        Action<List<Card>> onCandidate)
+    {
+        if (need == 1)
+        {
+            foreach (var card in hand.GroupBy(c => c).Select(g => g.First()))
+                onCandidate(new List<Card> { card });
+            return;
+        }
+
+        if (need == 2)
+        {
+            foreach (var pair in hand.GroupBy(c => c).Where(g => g.Count() >= 2))
+                onCandidate(pair.Take(2).ToList());
+            return;
+        }
+
+        if (need < 4 || need % 2 != 0)
+            return;
+
+        int pairCount = need / 2;
+        foreach (var group in BuildSystemGroups(config, hand))
+        {
+            var pairReps = group
+                .GroupBy(c => c)
+                .Where(g => g.Count() >= 2)
+                .Select(g => g.Key)
+                .OrderBy(c => c, comparer)
+                .ToList();
+
+            if (pairReps.Count < pairCount)
+                continue;
+
+            for (int start = 0; start <= pairReps.Count - pairCount; start++)
+            {
+                var tractorCards = new List<Card>(need);
+                for (int k = start; k < start + pairCount; k++)
+                {
+                    tractorCards.Add(pairReps[k]);
+                    tractorCards.Add(pairReps[k]);
+                }
+
+                var pattern = new CardPattern(tractorCards, config);
+                if (pattern.IsTractor(tractorCards))
+                    onCandidate(tractorCards);
+            }
+        }
+    }
+
+    private static List<List<Card>> BuildCanonicalFollowCandidates(
+        Game game,
+        int playerIndex,
+        List<Card> hand,
+        List<Card> leadCards,
+        GameConfig config)
+    {
+        var currentWinningCards = DetermineCurrentWinningCards(game, config);
+        int currentWinner = DetermineCurrentWinner(game, config);
+
+        var context = new RuleAIContext
+        {
+            Phase = PhaseKind.Follow,
+            PlayerIndex = playerIndex,
+            MyHand = new List<Card>(hand),
+            LeadCards = new List<Card>(leadCards),
+            CurrentWinningCards = currentWinningCards,
+            GameConfig = config,
+            RuleProfile = RuleProfile.FromConfig(config),
+            DifficultyProfile = DifficultyProfile.From(AIDifficulty.Hard),
+            StyleProfile = StyleProfile.Create(playerIndex * 997 + hand.Count * 31 + leadCards.Count),
+            DecisionFrame = new DecisionFrame
+            {
+                PhaseKind = PhaseKind.Follow,
+                CurrentWinningPlayer = currentWinner,
+                PartnerWinning = currentWinner >= 0 && currentWinner % 2 == playerIndex % 2,
+                LeadCards = new List<Card>(leadCards),
+                CurrentWinningCards = currentWinningCards,
+                CurrentTrickScore = game.CurrentTrick.Sum(play => play.Cards.Sum(card => card.Score))
+            }
+        };
+
+        return new FollowCandidateGenerator(config).Generate(context);
+    }
+
+    private static List<LegalAction> SelectCanonicalComplexActions(
+        List<LegalAction> actions,
+        GameConfig config)
+    {
+        var reservedTractors = actions
+            .Where(action => action.PatternType == "tractor")
+            .ToList();
+
+        var canonicalOthers = actions
+            .Where(action => action.PatternType != "tractor")
+            .GroupBy(action => $"{action.PatternType}|{action.System}", StringComparer.Ordinal)
+            .Select(group => group
+                .OrderByDescending(action => action.Cards.Count)
+                .ThenBy(action => ComplexityOrder(action.PatternType))
+                .ThenBy(action => SystemSortKey(action.System))
+                .ThenByDescending(action => CardStrength(action, config))
+                .ThenBy(action => action.DebugKey, StringComparer.Ordinal)
+                .First())
+            .ToList();
+
+        var canonical = reservedTractors
+            .Concat(canonicalOthers)
+            .OrderByDescending(action => action.Cards.Count)
+            .ThenBy(action => ComplexityOrder(action.PatternType))
+            .ThenBy(action => SystemSortKey(action.System))
+            .ThenByDescending(action => CardStrength(action, config))
+            .ThenBy(action => action.DebugKey, StringComparer.Ordinal)
+            .ToList();
+
+        if (canonical.Count > ActionSlotMapper.ReservedCount)
+        {
+            throw new InvalidOperationException(
+                $"ACTION_SPACE_OVERFLOW: canonical complex pool produced {canonical.Count} actions " +
+                $"after grouping non-tractor actions by pattern_type+system.");
+        }
+
+        return canonical;
     }
 
     // ─── Shared helpers ───
@@ -458,10 +538,46 @@ public static class LegalActionExporter
 
     private static string CardKey(Card c) => $"{(int)c.Suit}-{(int)c.Rank}";
 
-    private static int CountBits(int value)
+    private static int DetermineCurrentWinner(Game game, GameConfig config)
     {
-        int count = 0;
-        while (value != 0) { value &= value - 1; count++; }
-        return count;
+        if (game.CurrentTrick.Count == 0)
+            return -1;
+
+        var judge = new TrickJudge(config);
+        return judge.DetermineWinner(game.CurrentTrick);
+    }
+
+    private static List<Card> DetermineCurrentWinningCards(Game game, GameConfig config)
+    {
+        int winner = DetermineCurrentWinner(game, config);
+        if (winner < 0)
+            return new List<Card>();
+
+        var play = game.CurrentTrick.FirstOrDefault(trickPlay => trickPlay.PlayerIndex == winner);
+        return play?.Cards != null
+            ? new List<Card>(play.Cards)
+            : new List<Card>();
+    }
+
+    private static int ComplexityOrder(string patternType) => patternType switch
+    {
+        "mixed" => 0,
+        "throw" => 1,
+        _ => 2
+    };
+
+    private static int SystemSortKey(string system) => system switch
+    {
+        "spade" => 0,
+        "heart" => 1,
+        "club" => 2,
+        "diamond" => 3,
+        "trump" => 4,
+        _ => 5
+    };
+
+    private static int CardStrength(LegalAction action, GameConfig config)
+    {
+        return action.Cards.Sum(card => 53 - ActionSlotMapper.CardFaceIndex(card));
     }
 }

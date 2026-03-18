@@ -90,6 +90,15 @@ class EngineBridge:
         }
         return self._send(req)
 
+    def get_teacher_action(self, env_id: str) -> dict:
+        """Fetch the RuleAI-selected action for the current PPO player."""
+        req = {
+            "type": "get_teacher_action",
+            "request_id": self._next_id(),
+            "env_id": env_id,
+        }
+        return self._send(req)
+
     def get_state_snapshot(self, env_id: str) -> dict:
         """Fetch the state snapshot for the current player."""
         req = {

@@ -156,7 +156,7 @@ class PPOAgent:
 
     def update(self, states: np.ndarray, actions: np.ndarray, old_log_probs: np.ndarray,
               advantages: np.ndarray, returns: np.ndarray, action_masks: np.ndarray = None,
-              epochs=10, batch_size=256) -> Tuple[float, float]:
+              epochs=10, batch_size=256) -> Tuple[float, float, float]:
         """PPO更新
 
         Args:
@@ -172,6 +172,7 @@ class PPOAgent:
         Returns:
             avg_policy_loss: 平均策略损失
             avg_value_loss: 平均价值损失
+            avg_entropy: 平均策略熵
         """
         self.network.train()
 
@@ -190,6 +191,7 @@ class PPOAgent:
 
         total_policy_loss = 0
         total_value_loss = 0
+        total_entropy = 0
         num_updates = 0
 
         for epoch in range(epochs):
@@ -237,9 +239,14 @@ class PPOAgent:
 
                 total_policy_loss += policy_loss.item()
                 total_value_loss += value_loss.item()
+                total_entropy += entropy.mean().item()
                 num_updates += 1
 
-        return total_policy_loss / num_updates, total_value_loss / num_updates
+        return (
+            total_policy_loss / num_updates,
+            total_value_loss / num_updates,
+            total_entropy / num_updates,
+        )
 
     def save(self, path: str):
         """保存模型"""
@@ -295,10 +302,13 @@ if __name__ == '__main__':
     returns = np.random.randn(100).astype(np.float32)
     masks = np.ones((100, 384), dtype=bool)
 
-    policy_loss, value_loss = agent.update(
+    policy_loss, value_loss, entropy = agent.update(
         states, actions, old_log_probs, advantages, returns, masks,
         epochs=2, batch_size=32
     )
-    print(f"Update done - Policy Loss: {policy_loss:.4f}, Value Loss: {value_loss:.4f}")
+    print(
+        f"Update done - Policy Loss: {policy_loss:.4f}, "
+        f"Value Loss: {value_loss:.4f}, Entropy: {entropy:.4f}"
+    )
 
     print("\nAll tests passed!")

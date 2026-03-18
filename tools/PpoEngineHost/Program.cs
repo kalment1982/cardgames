@@ -98,9 +98,14 @@ class RequestDispatcher
                 "step" => HandleStep(line, requestId),
                 "get_state_snapshot" => HandleGetStateSnapshot(line, requestId),
                 "get_legal_actions" => HandleGetLegalActions(line, requestId),
+                "get_teacher_action" => HandleGetTeacherAction(line, requestId),
                 "close" => HandleClose(line, requestId),
                 _ => Error(type, requestId, ErrorCodes.InvalidRequest, $"Unknown request type: {type}")
             };
+        }
+        catch (PpoEngineProtocolException ex)
+        {
+            return Error(type, requestId, ex.ErrorCode, ex.Message);
         }
         catch (Exception ex)
         {
@@ -213,6 +218,31 @@ class RequestDispatcher
             RequestId = rid,
             EnvId = req.EnvId,
             LegalActions = session.ExportLegalActions(currentPlayer)
+        };
+        return JsonSerializer.Serialize(resp, _json);
+    }
+
+    private string HandleGetTeacherAction(string line, string? requestId)
+    {
+        var req = JsonSerializer.Deserialize<GetTeacherActionRequest>(line, _json);
+        if (req == null)
+            return Error("get_teacher_action", requestId, ErrorCodes.InvalidRequest, "Failed to parse request.");
+
+        var rid = requestId ?? req.RequestId;
+
+        var session = _envManager.GetSession(req.EnvId);
+        if (session == null)
+            return Error("get_teacher_action", rid, ErrorCodes.EnvNotFound, $"Environment '{req.EnvId}' not found.");
+
+        var currentPlayer = session.Game.State.CurrentPlayer;
+        var resp = new GetTeacherActionResponse
+        {
+            Ok = true,
+            Type = "get_teacher_action",
+            RequestId = rid,
+            EnvId = req.EnvId,
+            CurrentPlayer = currentPlayer,
+            TeacherAction = session.ExportTeacherAction(currentPlayer)
         };
         return JsonSerializer.Serialize(resp, _json);
     }

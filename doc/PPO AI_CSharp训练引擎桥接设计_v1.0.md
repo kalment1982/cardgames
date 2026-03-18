@@ -318,7 +318,31 @@
 - `ok`
 - `legal_actions`
 
-### 7.5 `close`
+### 7.5 `get_teacher_action`
+
+作用：
+
+- 返回当前 PPO 座位在当前状态下由 `RuleAI V2.1` 选出的教师动作
+- 用于 warm start 数据采集与行为克隆预训练
+
+请求字段：
+
+- `type = "get_teacher_action"`
+- `env_id`
+
+返回字段：
+
+- `ok`
+- `current_player`
+- `teacher_action`
+
+约束：
+
+1. 只对当前 PPO 座位有效
+2. 只在 `PlayTricks` 中使用
+3. `teacher_action.slot` 必须可直接送回 `step(action_slot)`
+
+### 7.6 `close`
 
 作用：
 
@@ -340,9 +364,11 @@
 `legal_actions` 的定义必须满足：
 
 1. 来源于 C# 正式规则，不来源于 RuleAI 候选偏好
-2. 表示“当前状态下全部合法动作”
-3. 每个合法动作必须能映射到固定动作空间 slot
-4. 不允许静默裁剪
+2. 对单张、对子、拖拉机表示“当前状态下全部合法动作”
+3. 对复杂首发与复杂跟牌表达为 Phase 1 bounded canonical 子集
+4. 每个已导出动作必须能映射到固定动作空间 slot
+5. 不允许静默裁剪已导出的动作
+6. 若当前 PPO 座位的 RuleAI 教师动作不在 canonical complex subset 中，Host 必须将该教师动作补入 `legal_actions`
 
 每个 action 至少应包含：
 
@@ -359,6 +385,15 @@
 - `slot` 用于 PPO 动作空间
 - `cards` 用于环境真实执行
 - 其他字段用于日志和调试
+- Host 执行 `step(action_slot)` 时必须使用该 `slot` 唯一解码出的具体合法动作，不允许回退到其他默认动作
+- 若某个拖拉机无法稳定唯一映射到固定 tractor slot（例如大小王顶或级牌顶的主牌拖拉机），必须退回保留槽，而不是复用已有 tractor slot
+- 这类保留槽拖拉机不参与 `pattern_type + system` canonical 折叠，必须逐个保留，否则 `slot -> concrete action` 仍然不唯一
+
+说明：
+
+- Phase 1 的复杂动作导出不是全部复杂合法动作的穷举
+- Phase 1 只导出 bounded canonical complex actions
+- 该约束只服务训练动作空间收敛，不改变正式规则真值
 
 ---
 
@@ -389,6 +424,7 @@
 - `defender_score`
 - `tricks_remaining`
 - `cards_left_by_player`
+- `is_lead`
 
 说明：
 
@@ -511,6 +547,41 @@
 }
 ```
 
+### 11.5 get_teacher_action 请求
+
+```json
+{
+  "type": "get_teacher_action",
+  "env_id": "env_0001"
+}
+```
+
+### 11.6 get_teacher_action 响应
+
+```json
+{
+  "ok": true,
+  "type": "get_teacher_action",
+  "env_id": "env_0001",
+  "current_player": 2,
+  "teacher_action": {
+    "slot": 369,
+    "cards": [
+      { "suit": "Heart", "rank": "Queen", "text": "♥Q" },
+      { "suit": "Heart", "rank": "Queen", "text": "♥Q" },
+      { "suit": "Heart", "rank": "Ace", "text": "♥A" }
+    ],
+    "pattern_type": "throw",
+    "system": "heart",
+    "is_lead": true,
+    "is_follow": false,
+    "is_throw": true,
+    "is_trump_cut": false,
+    "debug_key": "throw_heart_QQ_A"
+  }
+}
+```
+
 ---
 
 ## 12. 精确 JSON Schema
@@ -523,7 +594,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `type` | string | 是 | 请求类型，例如 `reset` / `step` / `get_state_snapshot` |
+| `type` | string | 是 | 请求类型，例如 `reset` / `step` / `get_state_snapshot` / `get_teacher_action` |
 | `request_id` | string | 否 | 请求唯一标识，便于日志与调试 |
 
 ### 12.2 通用响应结构
@@ -590,7 +661,24 @@
 | `state_snapshot` | object | 是 | 新状态快照 |
 | `terminal_result` | object | 否 | 终局才返回；Python 侧基于它计算最终 reward |
 
-### 12.7 `legal_action` 结构
+### 12.7 `get_teacher_action` 请求
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定为 `get_teacher_action` |
+| `env_id` | string | 是 | 环境实例 ID |
+
+### 12.8 `get_teacher_action` 响应
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `ok` | bool | 是 | 是否成功 |
+| `type` | string | 是 | 固定为 `get_teacher_action` |
+| `env_id` | string | 是 | 环境实例 ID |
+| `current_player` | int | 是 | 当前 PPO 座位 |
+| `teacher_action` | object | 否 | 当前 PPO 座位对应的 RuleAI V2.1 教师动作 |
+
+### 12.9 `legal_action` 结构
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -604,7 +692,7 @@
 | `is_trump_cut` | bool | 是 | 是否属于主牌压制/毙牌 |
 | `debug_key` | string | 否 | 调试稳定 key，用于日志核对 |
 
-### 12.8 `state_snapshot` 结构
+### 12.10 `state_snapshot` 结构
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -630,7 +718,7 @@
 | `played_trick_count` | int | 是 | 已完成墩数 |
 | `terminal` | bool | 是 | 是否终局 |
 
-### 12.9 `terminal_result` 结构
+### 12.11 `terminal_result` 结构
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -641,7 +729,7 @@
 | `defender_score` | int | 是 | 闲家总分 |
 | `next_dealer` | int | 是 | 下一局庄家座位 |
 
-### 12.10 `card` 结构
+### 12.12 `card` 结构
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -650,14 +738,14 @@
 | `score` | int | 否 | 分值，便于调试 |
 | `text` | string | 否 | 展示文本，便于调试 |
 
-### 12.11 `current_trick` 中单条 play 结构
+### 12.13 `current_trick` 中单条 play 结构
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `player_index` | int | 是 | 出牌玩家 |
 | `cards` | object[] | 是 | 该玩家当前墩打出的牌 |
 
-### 12.12 奖励计算职责
+### 12.14 奖励计算职责
 
 阶段 1 的奖励计算职责明确如下：
 
@@ -668,6 +756,7 @@
    - `my_team_level_gain`
    - `my_team_final_score`
    计算最终奖励
+4. warm start 采样时，Python 通过 `get_teacher_action` 拉取教师动作，再通过同一个 `step(action_slot)` 执行；C# 不额外提供隐藏执行通道
 
 原因：
 
@@ -689,7 +778,7 @@
 | `ACTION_SLOT_NOT_LEGAL` | `action_slot` 当前不在合法动作集合中 |
 | `PHASE_NOT_PLAY_TRICKS` | 阶段不在 PPO 接管范围内 |
 | `ENGINE_INTERNAL_ERROR` | C# 引擎内部异常 |
-| `ACTION_SPACE_OVERFLOW` | 当前合法动作数量超过固定动作空间容量 |
+| `ACTION_SPACE_OVERFLOW` | 当前导出的 canonical 合法动作数量超过固定动作空间容量 |
 
 要求：
 

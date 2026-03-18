@@ -16,10 +16,11 @@ public class LegalAction
     /// <summary>
     /// Serialize to anonymous object matching the JSON protocol.
     /// </summary>
-    public object ToSerializable()
+    public object ToSerializable(int slot)
     {
         return new
         {
+            slot,
             cards = Cards.Select(c => new
             {
                 suit = c.IsJoker ? "Joker" : c.Suit.ToString(),

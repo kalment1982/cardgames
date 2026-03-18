@@ -28,6 +28,15 @@ evaluation:
   num_eval_games: 100
   eval_seeds_file: "rl_training/eval_seeds.txt"
 
+warm_start:
+  dataset_path: "artifacts/ppo_warm_start/ruleai_v21_playtricks_2000g.npz"
+  checkpoint_path: "checkpoints/phase1_warm_start/pretrained_ruleai_v21.pt"
+  num_games: 2000
+  bc_epochs: 3
+  batch_size: 256
+  learning_rate: 0.0003
+
 logging:
   log_dir: "logs/phase1"
   checkpoint_dir: "checkpoints/phase1"
+  tensorboard_dir: "logs/phase1/tb"

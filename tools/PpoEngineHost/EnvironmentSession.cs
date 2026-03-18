@@ -43,8 +43,25 @@ public class EnvironmentSession
         if (playerIndex < 0 || !IsPpoSeat(playerIndex))
             return Array.Empty<object>();
 
-        var actions = LegalActionExporter.Export(_game, playerIndex);
-        return actions.Select(a => a.ToSerializable()).ToArray();
+        var teacherSelection = IsPpoSeat(playerIndex) ? SelectTeacherDecisionCards(playerIndex) : null;
+        var mapped = GetMappedLegalActions(playerIndex, teacherSelection);
+        return mapped.Select(m => m.action.ToSerializable(m.slot)).ToArray();
+    }
+
+    /// <summary>
+    /// Export the RuleAI-selected action for the current PPO player without
+    /// mutating game state. Returns null when unavailable.
+    /// </summary>
+    public object? ExportTeacherAction(int playerIndex)
+    {
+        if (_game.State.Phase != GamePhase.Playing)
+            return null;
+
+        if (playerIndex < 0 || !IsPpoSeat(playerIndex))
+            return null;
+
+        var (slot, action) = GetTeacherMappedAction(playerIndex);
+        return action.ToSerializable(slot);
     }
 
     /// <summary>
@@ -96,7 +113,9 @@ public class EnvironmentSession
             TrumpSuit = _game.State.TrumpSuit
         };
 
-        // Create RuleAI players for non-PPO seats
+        // Create RuleAI players for all seats.
+        // PPO seats do not auto-play, but warm-start data collection can query
+        // their RuleAI teacher actions through the same runtime path.
         _ruleParameters = ChampionLoader.LoadChampion();
         _ruleOptions = RuleAIOptions.Create(
             useRuleAIV21: true,
@@ -108,16 +127,13 @@ public class EnvironmentSession
         _rulePlayers = new AIPlayer?[4];
         for (var i = 0; i < 4; i++)
         {
-            if (_ruleAiSeats.Contains(i))
-            {
-                _rulePlayers[i] = new AIPlayer(
-                    _config,
-                    AIDifficulty.Hard,
-                    _seed + i + 97,
-                    _ruleParameters,
-                    NullGameLogger.Instance,
-                    _ruleOptions);
-            }
+            _rulePlayers[i] = new AIPlayer(
+                _config,
+                AIDifficulty.Hard,
+                _seed + i + 97,
+                _ruleParameters,
+                NullGameLogger.Instance,
+                _ruleOptions);
         }
 
         // Bury bottom
@@ -161,11 +177,9 @@ public class EnvironmentSession
         if (!IsPpoSeat(playerIndex))
             throw new InvalidOperationException($"Current player {playerIndex} is not a PPO seat.");
 
-        // Placeholder: decode action_slot to cards.
-        // For now, use LegalPlayResolver to pick a legal play.
         SyncConfig();
-        if (!LegalPlayResolver.TryResolve(_game, playerIndex, _config, out var cards))
-            throw new InvalidOperationException($"No legal play found for player {playerIndex}.");
+        var action = ResolveActionForSlot(playerIndex, actionSlot);
+        var cards = new List<Card>(action.Cards);
 
         var playResult = _game.PlayCardsEx(playerIndex, cards);
         if (!playResult.Success)
@@ -287,6 +301,86 @@ public class EnvironmentSession
     }
 
     private int _lastRecordedTrickNo;
+
+    private List<(int slot, LegalAction action)> GetMappedLegalActions(int playerIndex, List<Card>? preferredCards = null)
+    {
+        SyncConfig();
+        if (preferredCards == null && IsPpoSeat(playerIndex))
+        {
+            preferredCards = SelectTeacherDecisionCards(playerIndex);
+        }
+
+        var actions = LegalActionExporter.Export(_game, playerIndex);
+        if (preferredCards is { Count: > 0 })
+        {
+            var preferredKey = BuildCandidateKey(preferredCards);
+            if (!actions.Any(action => string.Equals(BuildCandidateKey(action.Cards), preferredKey, StringComparison.Ordinal)))
+            {
+                actions.Add(LegalActionExporter.CreateForCurrentState(_game, playerIndex, preferredCards));
+            }
+        }
+
+        try
+        {
+            return ActionSlotMapper.MapAllActions(actions, _config);
+        }
+        catch (InvalidOperationException ex) when (
+            ex.Message.StartsWith("ACTION_SPACE_OVERFLOW:", StringComparison.Ordinal) ||
+            ex.Message.StartsWith("ACTION_SLOT_CONFLICT:", StringComparison.Ordinal))
+        {
+            throw new PpoEngineProtocolException(ErrorCodes.ActionSpaceOverflow, ex.Message);
+        }
+    }
+
+    private LegalAction ResolveActionForSlot(int playerIndex, int actionSlot)
+    {
+        if (actionSlot < 0 || actionSlot >= ActionSlotMapper.ActionDim)
+        {
+            throw new PpoEngineProtocolException(
+                ErrorCodes.InvalidActionSlot,
+                $"Action slot {actionSlot} is outside [0, {ActionSlotMapper.ActionDim - 1}].");
+        }
+
+        var mapped = GetMappedLegalActions(playerIndex);
+        foreach (var (slot, action) in mapped)
+        {
+            if (slot == actionSlot)
+                return action;
+        }
+
+        throw new PpoEngineProtocolException(
+            ErrorCodes.ActionSlotNotLegal,
+            $"Action slot {actionSlot} is not legal for player {playerIndex} in the current state.");
+    }
+
+    private (int slot, LegalAction action) GetTeacherMappedAction(int playerIndex)
+    {
+        var selectedCards = SelectTeacherDecisionCards(playerIndex);
+        var selectedKey = BuildCandidateKey(selectedCards);
+        var mappedActions = GetMappedLegalActions(playerIndex, selectedCards);
+        foreach (var mapped in mappedActions)
+        {
+            if (string.Equals(BuildCandidateKey(mapped.action.Cards), selectedKey, StringComparison.Ordinal))
+                return mapped;
+        }
+
+        var mappedKeys = string.Join(", ", mappedActions
+            .Select(item => $"{item.slot}:{BuildCandidateKey(item.action.Cards)}"));
+
+        throw new InvalidOperationException(
+            $"Teacher action for player {playerIndex} not found in mapped legal actions. " +
+            $"selected={selectedKey}; legal=[{mappedKeys}]");
+    }
+
+    private List<Card> SelectTeacherDecisionCards(int playerIndex)
+    {
+        var ai = _rulePlayers[playerIndex];
+        if (ai == null)
+            throw new InvalidOperationException($"Teacher RuleAI for player {playerIndex} is not initialized.");
+
+        var hand = _game.State.PlayerHands[playerIndex];
+        return SelectRuleDecision(playerIndex, ai, hand);
+    }
 
     private void CheckAndRecordCompletedTrick()
     {
@@ -415,5 +509,13 @@ public class EnvironmentSession
             .ThenBy(c => c, comparer)
             .Take(count)
             .ToList();
+    }
+
+    private static string BuildCandidateKey(IEnumerable<Card> cards)
+    {
+        return string.Join(",", cards
+            .OrderBy(card => (int)card.Suit)
+            .ThenBy(card => (int)card.Rank)
+            .Select(card => $"{(int)card.Suit}-{(int)card.Rank}"));
     }
 }

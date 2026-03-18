@@ -6,7 +6,7 @@ End-to-end verification script for PpoEngineHost <-> Python bridge.
 3. Loops step requests (random legal action) until game ends
 4. Validates terminal_result exists
 5. Validates StateEncoder produces 382-dim vector
-6. Validates action_mask produces 384-dim vector
+6. Validates action_mask produces ACTION_DIM vector
 """
 import os
 import random
@@ -36,6 +36,9 @@ SEED = 42
 
 def pick_random_slot(legal_actions: list[dict]) -> int:
     """Pick a random legal action slot from the action list."""
+    if legal_actions and "slot" in legal_actions[0]:
+        return random.choice(legal_actions)["slot"]
+
     mapped = map_all_actions(legal_actions)
     if not mapped:
         raise RuntimeError("No legal actions to choose from!")
@@ -68,9 +71,9 @@ def main():
         print(f"  Observation dim: {obs.shape[0]} (expected 382)")
 
         mask = build_action_mask(legal_actions)
-        assert mask.shape == (384,), f"Mask dim mismatch: {mask.shape}"
+        assert mask.shape == (ACTION_DIM,), f"Mask dim mismatch: {mask.shape}"
         legal_count = int(mask.sum())
-        print(f"  Action mask dim: {mask.shape[0]} (expected 384), legal={legal_count}")
+        print(f"  Action mask dim: {mask.shape[0]} (expected {ACTION_DIM}), legal={legal_count}")
         print()
 
         # ── Step loop ──
@@ -95,7 +98,7 @@ def main():
                 obs = encoder.encode(snapshot, legal_actions)
                 assert obs.shape == (382,), f"Step {step_num}: obs dim {obs.shape}"
                 mask = build_action_mask(legal_actions)
-                assert mask.shape == (384,), f"Step {step_num}: mask dim {mask.shape}"
+                assert mask.shape == (ACTION_DIM,), f"Step {step_num}: mask dim {mask.shape}"
                 legal_count = int(mask.sum())
 
                 print(f"Step {step_num}: player={current_player}, "
@@ -116,9 +119,9 @@ def main():
 
             # Final dimension checks
             final_obs = np.zeros(382, dtype=np.float32)
-            final_mask = np.zeros(384, dtype=np.float32)
+            final_mask = np.zeros(ACTION_DIM, dtype=np.float32)
             print(f"Observation dim: {final_obs.shape[0]} {'OK' if final_obs.shape[0] == 382 else 'FAIL'}")
-            print(f"Action mask dim: {final_mask.shape[0]} {'OK' if final_mask.shape[0] == 384 else 'FAIL'}")
+            print(f"Action mask dim: {final_mask.shape[0]} {'OK' if final_mask.shape[0] == ACTION_DIM else 'FAIL'}")
             print()
             print("=== Verification PASSED ===")
         else:

@@ -279,9 +279,36 @@ dotnet test --filter "Category=Benchmark"
 python3 rl_training/generate_eval_seeds.py
 ```
 
+推荐的一键启动脚本（会自动准备 `.venv_phase2`、启动 TensorBoard 和 Streamlit、打印访问地址，再启动训练）：
+```bash
+bash rl_training/start_phase2_visual_training.sh
+```
+
+常用示例：
+```bash
+bash rl_training/start_phase2_visual_training.sh --max_iterations 1
+bash rl_training/start_phase2_visual_training.sh --resume checkpoints/phase1/checkpoint_500.pt
+```
+
 启动完整训练（2000 次迭代，约 20,000 局）：
 ```bash
 python3 rl_training/train_phase1.py
+```
+
+按当前默认版生成 warm start 数据并预训练：
+```bash
+python3 rl_training/generate_warm_start_data.py
+python3 rl_training/pretrain_bc.py
+```
+
+从 warm-start checkpoint 启动训练：
+```bash
+python3 rl_training/train_phase1.py --init_checkpoint checkpoints/phase1_warm_start/pretrained_ruleai_v21.pt
+```
+
+默认一键 warm-start 流程：
+```bash
+bash rl_training/start_warm_start_default.sh
 ```
 
 从检查点恢复训练：
@@ -319,14 +346,24 @@ python3 rl_training/evaluate_phase1.py --checkpoint checkpoints/phase1/best_mode
 
 训练日志：
 - `logs/phase1/training_log.csv` - 包含每次迭代的指标
+- `logs/phase1/eval_summary.csv` - 每次评估的汇总结果
+- `logs/phase1/eval_match_results.jsonl` - 每局评估结果明细
+- `logs/phase1/tb/` - TensorBoard event 文件
+- `logs/phase1/service_logs/tensorboard.log` - TensorBoard 服务日志
+- `logs/phase1/service_logs/streamlit.log` - Streamlit 服务日志
 
 检查点：
 - `checkpoints/phase1/checkpoint_N.pt` - 每 50 次迭代保存
 - `checkpoints/phase1/best_model.pt` - 最佳评估胜率模型
 - `checkpoints/phase1/final_model.pt` - 训练结束时的最终模型
+- `checkpoints/phase1_warm_start/pretrained_ruleai_v21.pt` - 默认 warm-start 预训练权重
 
 评估种子：
 - `rl_training/eval_seeds.txt` - 100 个固定种子用于可复现评估
+
+warm start 数据：
+- `artifacts/ppo_warm_start/ruleai_v21_playtricks_2000g.npz`
+- `artifacts/ppo_warm_start/ruleai_v21_playtricks_2000g.json`
 
 ### 训练架构
 
@@ -334,6 +371,7 @@ python3 rl_training/evaluate_phase1.py --checkpoint checkpoints/phase1/best_mode
 - PPO 座位：[0, 2]（南、北）
 - RuleAI 座位：[1, 3]（东、西）
 - C# 引擎：`tools/PpoEngineHost/bin/Release/net6.0/PpoEngineHost`
+- warm start 教师：`RuleAI V2.1`
 
 **奖励函数：**
 ```
@@ -348,6 +386,12 @@ R = (+10 if win else -10) + 2 * level_gain + 0.02 * final_score
 4. 每 10 次迭代评估（100 局固定种子）
 5. 每 50 次迭代保存检查点
 
+**warm start 默认版：**
+1. 用 `get_teacher_action` 从 C# Host 拉取当前 PPO 座位的 RuleAI 教师动作
+2. 采集 `(state, legal_mask, teacher_slot)` 数据
+3. 执行 `policy-only` 行为克隆预训练 `3` 个 epoch
+4. 用 `--init_checkpoint` 启动标准 Phase 1 PPO
+
 ### 关键文件
 
 实现文件：
@@ -356,6 +400,9 @@ R = (+10 if win else -10) + 2 * level_gain + 0.02 * final_score
 - `rl_training/evaluate_phase1.py` - 评估脚本
 - `rl_training/mvp_env.py` - Gym 风格环境包装器
 - `rl_training/engine_bridge.py` - C# 引擎桥接
+- `rl_training/generate_warm_start_data.py` - warm-start 数据采集
+- `rl_training/pretrain_bc.py` - policy-only 行为克隆预训练
+- `rl_training/start_warm_start_default.sh` - 默认一键 warm-start 流程
 - `rl_training/state_encoder.py` - 状态编码器（382 维）
 - `rl_training/action_mask.py` - 动作掩码构建器（384 维）
 
@@ -388,3 +435,14 @@ python3 rl_training/evaluate_phase1.py --checkpoint checkpoints/phase1/final_mod
 - CPU（回退选项）
 
 训练脚本会自动选择最佳可用设备。
+
+### Phase 2 可视化地址
+
+默认端口：
+- TensorBoard: `http://127.0.0.1:6007`
+- Streamlit: `http://127.0.0.1:8502`
+
+可通过环境变量覆盖：
+```bash
+TRACTOR_PPO_TB_PORT=6008 TRACTOR_PPO_STREAMLIT_PORT=8503 bash rl_training/start_phase2_visual_training.sh
+```

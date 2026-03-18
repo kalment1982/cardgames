@@ -1,6 +1,13 @@
 """
 预训练脚本 - 使用LLM生成的专家数据预训练策略网络
 """
+if __name__ == "__main__":
+    import sys
+
+    print("Legacy workflow disabled: pretrain.py is preserved for reference only.")
+    print("Active PPO training entrypoint: python3 rl_training/train_phase1.py")
+    sys.exit(1)
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -175,13 +182,3 @@ def pretrain_from_llm(config_path: str = "config.yaml"):
     print(f"  Best validation accuracy: {best_val_acc:.2f}%")
     print(f"  Model saved to: {pretrain_config['save_path']}")
 
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Pretrain policy network from LLM expert data")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
-
-    args = parser.parse_args()
-
-    pretrain_from_llm(args.config)

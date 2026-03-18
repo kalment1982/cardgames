@@ -115,6 +115,18 @@ class TractorEnv:
         info["legal_mask"] = mask
         return obs, reward, done, info
 
+    def get_teacher_action(self) -> dict:
+        """Return the RuleAI teacher action for the current PPO seat."""
+        if self._done:
+            raise RuntimeError("Episode already finished. Call reset().")
+        if self._env_id is None:
+            raise RuntimeError("No active environment. Call reset() first.")
+        resp = self.bridge.get_teacher_action(self._env_id)
+        teacher = resp.get("teacher_action")
+        if not teacher:
+            raise RuntimeError("Teacher action unavailable for current environment state.")
+        return teacher
+
     def close(self):
         """Shut down the C# host process."""
         try:

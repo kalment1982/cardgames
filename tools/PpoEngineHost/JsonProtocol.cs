@@ -46,6 +46,12 @@ public class GetLegalActionsRequest : BaseRequest
     public string EnvId { get; set; } = string.Empty;
 }
 
+public class GetTeacherActionRequest : BaseRequest
+{
+    [JsonPropertyName("env_id")]
+    public string EnvId { get; set; } = string.Empty;
+}
+
 public class CloseRequest : BaseRequest
 {
     [JsonPropertyName("env_id")]
@@ -159,6 +165,19 @@ public class GetLegalActionsResponse : BaseResponse
     public object[] LegalActions { get; set; } = Array.Empty<object>();
 }
 
+public class GetTeacherActionResponse : BaseResponse
+{
+    [JsonPropertyName("env_id")]
+    public string EnvId { get; set; } = string.Empty;
+
+    [JsonPropertyName("current_player")]
+    public int CurrentPlayer { get; set; }
+
+    [JsonPropertyName("teacher_action")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public object? TeacherAction { get; set; }
+}
+
 public class CloseResponse : BaseResponse
 {
 }
@@ -174,4 +193,15 @@ public static class ErrorCodes
     public const string PhaseNotPlayTricks = "PHASE_NOT_PLAY_TRICKS";
     public const string EngineInternalError = "ENGINE_INTERNAL_ERROR";
     public const string ActionSpaceOverflow = "ACTION_SPACE_OVERFLOW";
+}
+
+public class PpoEngineProtocolException : Exception
+{
+    public string ErrorCode { get; }
+
+    public PpoEngineProtocolException(string errorCode, string message)
+        : base(message)
+    {
+        ErrorCode = errorCode;
+    }
 }

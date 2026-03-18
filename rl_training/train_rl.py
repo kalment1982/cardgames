@@ -296,7 +296,7 @@ class PPOTrainer:
         action_masks = np.array([t['action_mask'] for t in trajectories])
 
         # PPO更新
-        policy_loss, value_loss = self.agent.update(
+        policy_loss, value_loss, _entropy = self.agent.update(
             states, actions, old_log_probs, advantages, returns, action_masks,
             epochs=self.config['epochs_per_iteration'],
             batch_size=self.config['batch_size']

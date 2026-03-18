@@ -2,6 +2,13 @@
 LLM Teacher - 使用云端LLM生成专家数据
 支持自定义环境变量名配置API密钥和URL
 """
+if __name__ == "__main__":
+    import sys
+
+    print("Legacy workflow disabled: llm_teacher.py is preserved for reference only.")
+    print("Active PPO training entrypoint: python3 rl_training/train_phase1.py")
+    sys.exit(1)
+
 import os
 import json
 import yaml
@@ -295,25 +302,3 @@ class LLMTeacher:
 
         return str1 == str2
 
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="LLM Teacher - Generate expert dataset")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
-    parser.add_argument("--generate", action="store_true", help="Generate expert dataset")
-    parser.add_argument("--num-games", type=int, default=None, help="Number of games to generate")
-    parser.add_argument("--resume-from", type=int, default=0, help="Resume from game index")
-
-    args = parser.parse_args()
-
-    teacher = LLMTeacher(args.config)
-
-    if args.generate:
-        teacher.collect_expert_dataset(
-            num_games=args.num_games,
-            resume_from=args.resume_from
-        )
-    else:
-        print("Use --generate to start collecting expert dataset")
-        print("Example: python llm_teacher.py --generate --num-games 100")

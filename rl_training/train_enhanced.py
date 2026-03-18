@@ -1,6 +1,13 @@
 """
 增强版训练脚本 - PPO + 增强状态编码 + LLM预训练
 """
+if __name__ == "__main__":
+    import sys
+
+    print("Legacy workflow disabled: train_enhanced.py is preserved for reference only.")
+    print("Active PPO training entrypoint: python3 rl_training/train_phase1.py")
+    sys.exit(1)
+
 import glob
 import torch
 import numpy as np
@@ -484,15 +491,3 @@ def simulate_game_worker(model_state_dict: dict, seed: int, state_dim: int) -> D
 
     return trajectory
 
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Enhanced PPO Training")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Config file path")
-    parser.add_argument("--resume", type=str, default=None, help="Checkpoint path to resume from")
-
-    args = parser.parse_args()
-
-    trainer = EnhancedPPOTrainer(args.config, resume_path=args.resume)
-    trainer.train()

@@ -22,7 +22,8 @@ public static class ActionSlotMapper
 
     /// <summary>
     /// Map a single action to its slot index.
-    /// Returns -1 for complex actions (throw/mixed) that need reserved-slot assignment.
+    /// Returns -1 for complex actions or unsupported tractors that need
+    /// reserved-slot assignment.
     /// </summary>
     public static int MapToSlot(LegalAction action, GameConfig config)
     {
@@ -35,6 +36,11 @@ public static class ActionSlotMapper
                 return PairBase + CardFaceIndex(action.Cards[0]);
 
             case "tractor":
+                var pairCount = action.Cards.Count / 2;
+                if (pairCount < 2 || pairCount > 5)
+                    return -1;
+                if (IsAmbiguousTrumpTractor(action, config))
+                    return -1;
                 return MapTractorSlot(action, config);
 
             default:
@@ -185,10 +191,12 @@ public static class ActionSlotMapper
     /// <summary>
     /// Determine the start rank of a tractor action.
     /// For suit tractors: the highest rank among the pairs.
-    /// For trump tractors: the highest non-joker, non-level rank among the pairs,
-    /// mapped through the trump ordering.
+    /// For trump tractors: the highest pair representative under trump ordering.
     /// </summary>
     public static Rank TractorStartRank(LegalAction action, GameConfig config)
+        => TractorTopCard(action, config).Rank;
+
+    private static Card TractorTopCard(LegalAction action, GameConfig config)
     {
         var comparer = new CardComparer(config);
         // Get distinct pair representatives sorted descending
@@ -203,8 +211,7 @@ public static class ActionSlotMapper
             throw new InvalidOperationException("Tractor has no pairs");
 
         // The highest pair card is the "start" of the tractor
-        var topCard = pairRanks[0];
-        return topCard.Rank;
+        return pairRanks[0];
     }
 
     // ─── Private helpers ───
@@ -224,6 +231,19 @@ public static class ActionSlotMapper
         return TractorBase + sys * 52 + start * 4 + lengthOffset;
     }
 
+    private static bool IsAmbiguousTrumpTractor(LegalAction action, GameConfig config)
+    {
+        if (!string.Equals(action.System, "trump", StringComparison.Ordinal))
+            return false;
+
+        var topCard = TractorTopCard(action, config);
+        // Trump tractors topped by jokers or level-rank pairs cannot be
+        // uniquely decoded from the fixed tractor slot semantics.
+        return topCard.Rank == Rank.BigJoker
+               || topCard.Rank == Rank.SmallJoker
+               || topCard.Rank == config.LevelRank;
+    }
+
     /// <summary>
     /// For trump-system tractors the start index must account for the
     /// special trump ordering. For suit-system tractors it's a direct
@@ -238,37 +258,16 @@ public static class ActionSlotMapper
 
     /// <summary>
     /// Map a trump-system rank to the stable start index.
-    /// Jokers and level-rank cards use the position of the rank they
-    /// effectively occupy in the trump sequence.
-    /// BigJoker/SmallJoker → not valid tractor starts on their own
-    /// (they pair with each other, which is a special pair, not a tractor start).
-    /// Level rank → maps to its natural rank position.
-    /// Other trump ranks → direct mapping.
+    /// Non-ambiguous trump tractors reuse the stable rank position.
+    /// Ambiguous joker / level-rank starts are filtered earlier and routed to
+    /// reserved slots instead of passing through this mapping.
     /// </summary>
     private static int TrumpRankToStartIndex(Rank rank, GameConfig config)
     {
-        // Jokers: map to their natural position is not meaningful for start index.
-        // In practice, a trump tractor's top pair could be jokers only if
-        // BigJoker+BigJoker is the top pair. We map jokers to a sentinel
-        // that won't collide — but the spec says start ∈ [0,12] for A..2.
-        // A trump tractor topped by joker pairs would need the level rank
-        // pair below them. The "start" should be the highest pair's rank.
-        // For BigJoker pair as top: this is an edge case; we use start=0
-        // (same position as A, the highest non-joker rank concept).
-        if (rank == Rank.BigJoker || rank == Rank.SmallJoker)
-        {
-            // The start index for a joker-topped tractor:
-            // In trump order: BJ > SJ > level_rank > A > K > ...
-            // We don't have a dedicated slot for joker starts.
-            // Per spec, start ∈ [0,12] maps to A..2.
-            // Joker-topped tractors are extremely rare (need BJ pair + SJ pair).
-            // Map to start=0 (A position) as the closest stable slot.
-            // The level rank + config context makes this decodable.
-            return 0;
-        }
+        if (rank == Rank.BigJoker || rank == Rank.SmallJoker || rank == config.LevelRank)
+            throw new ArgumentException(
+                $"Ambiguous trump tractor start rank {rank} must use a reserved slot.");
 
-        // Level rank in trump system: maps to its natural rank position
-        // (the spec says we use stable rank positions, not physical trump order)
         return RankToStartIndex(rank);
     }
 

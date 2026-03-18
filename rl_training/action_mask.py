@@ -6,9 +6,9 @@ the C# PpoEngineHost.  Each legal action carries a ``slot`` field that
 maps directly into the ACTION_DIM=384 action space defined by
 ``ActionSlotMapper``.
 
-Because the current C# ``ExportLegalActions`` does not yet include a
-``slot`` field, this module also provides ``compute_slot`` to replicate
-the ActionSlotMapper logic in Python.
+When ``legal_actions`` already contain ``slot``, callers should use those
+directly. This module also provides ``compute_slot`` / ``map_all_actions``
+as a Python fallback for diagnostics.
 """
 import numpy as np
 
@@ -44,6 +44,9 @@ def compute_slot(action: dict) -> int:
         return _PAIR_BASE + card_face_index(cards[0])
 
     if pattern == "tractor" and len(cards) >= 4:
+        rank_names = [c.get("rank", "") for c in cards]
+        if "BigJoker" in rank_names or "SmallJoker" in rank_names:
+            return -1
         system = action.get("system", "trump")
         sys_idx = _SYSTEM_INDEX.get(system, 4)
         # Find the highest-rank pair representative
@@ -121,6 +124,13 @@ def map_all_actions(actions: list[dict]) -> list[tuple[int, dict]]:
         slot_set.add(slot)
         result.append((slot, a))
 
+    if len(complex_actions) > _RESERVED_COUNT:
+        keys = ", ".join(a.get("debug_key", "") for a in complex_actions)
+        raise RuntimeError(
+            f"ACTION_SPACE_OVERFLOW: {len(complex_actions)} complex actions "
+            f"exceed reserved slot capacity ({_RESERVED_COUNT}). Keys: [{keys}]"
+        )
+
     # Sort complex actions with stable ordering matching C#
     complex_actions.sort(key=lambda a: (
         -len(a.get("cards", [])),       # 1. total card count desc
@@ -131,8 +141,6 @@ def map_all_actions(actions: list[dict]) -> list[tuple[int, dict]]:
     ))
 
     for i, a in enumerate(complex_actions):
-        if i >= _RESERVED_COUNT:
-            break
         slot = _RESERVED_BASE + i
         slot_set.add(slot)
         result.append((slot, a))

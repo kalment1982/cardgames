@@ -1,5 +1,9 @@
 # RL训练配置文件
 
+# Legacy configuration file.
+# This file belongs to the archived LLM Teacher workflow and is not the
+# active PPO AI training config. Use `phase1_config.yaml` instead.
+
 # LLM API配置
 llm:
   # API类型: openai / anthropic / custom
