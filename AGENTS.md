@@ -100,6 +100,60 @@ Before touching AI code, decide which line the task belongs to:
 
 Do not assume PPO is the source of current gameplay bugs unless the user explicitly asks about `rl_training` or a new integration task.
 
+## PPO AI Mac mini Handoff
+
+If the task is to continue `PPO AI` training on another machine, especially a `Mac mini` controlled by `Codex CLI`, do not redesign the training flow from scratch.
+
+Use the prepared handoff artifacts first:
+
+- Setup script:
+  - `/Users/karmy/Projects/CardGame/tractor/scripts/setup_macmini_ppo.sh`
+- Direct resume script:
+  - `/Users/karmy/Projects/CardGame/tractor/scripts/start_macmini_ppo_resume.sh`
+- Codex-driven remote start wrapper:
+  - `/Users/karmy/Projects/CardGame/tractor/scripts/start_macmini_codex_ppo.sh`
+- Stop script:
+  - `/Users/karmy/Projects/CardGame/tractor/scripts/stop_macmini_ppo_run.sh`
+- Handoff doc:
+  - `/Users/karmy/Projects/CardGame/tractor/doc/PPO AI_MacMini训练迁移指南_v1.0.md`
+
+### Default resume policy
+
+Unless the user explicitly asks otherwise, remote `PPO AI` continuation should resume from:
+
+- `/Users/karmy/Projects/CardGame/tractor/checkpoints/phase1_overnight_20260319_005351/best_model.pt`
+
+Do not default to:
+
+- re-running warm-start data generation
+- re-running behavior cloning pretrain
+- starting from `pretrained_ruleai_v21.pt`
+- resuming from the latest `final_model.pt` if `best_model.pt` is available
+
+### Working rule for remote Codex
+
+When remote `Codex CLI` is asked to start PPO training on the copied directory:
+
+1. first read this `AGENTS.md`
+2. then use the prepared setup / start scripts
+3. keep logs and checkpoints in a fresh run-specific directory
+4. verify `run.out` is growing before reporting success
+5. report:
+   - run tag
+   - log directory
+   - checkpoint directory
+   - TensorBoard URL
+   - Streamlit URL
+
+Do not spend time re-deriving:
+
+- which checkpoint to resume from
+- which ports to use by default
+- how to build `PpoEngineHost`
+- whether the run should be isolated from old logs
+
+Those decisions are already encoded in the prepared scripts and handoff doc.
+
 ## Shared AI Input Schema
 
 RuleAI and PPO now share a single input-definition source of truth:

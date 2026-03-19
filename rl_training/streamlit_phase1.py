@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -15,7 +16,7 @@ import streamlit as st
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LOG_DIR = PROJECT_ROOT / "logs" / "phase1"
+LOG_DIR = Path(os.environ.get("TRACTOR_PPO_LOG_DIR", PROJECT_ROOT / "logs" / "phase1"))
 TRAINING_LOG = LOG_DIR / "training_log.csv"
 EVAL_SUMMARY_LOG = LOG_DIR / "eval_summary.csv"
 EVAL_MATCH_LOG = LOG_DIR / "eval_match_results.jsonl"

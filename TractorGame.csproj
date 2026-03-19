@@ -27,4 +27,10 @@
     <None Remove="tools/**" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="tools/PpoEngineHost/LegalAction.cs" />
+    <Compile Include="tools/PpoEngineHost/ActionSlotMapper.cs" />
+    <Compile Include="tools/PpoEngineHost/LegalActionExporter.cs" />
+  </ItemGroup>
+
 </Project>
