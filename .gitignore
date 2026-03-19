@@ -25,8 +25,16 @@ TestResults/
 
 # Logs
 *.log
+logs/
 
 # Training outputs
 data/
-logs/raw/
-logs/replay/
+checkpoints/
+artifacts/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Training configs (auto-generated)
+rl_training/phase1_config_*.yaml
