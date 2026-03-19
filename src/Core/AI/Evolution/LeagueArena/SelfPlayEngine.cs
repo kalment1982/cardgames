@@ -79,7 +79,7 @@ namespace TractorGame.Core.AI.Evolution.LeagueArena
             var aiConfig = new GameConfig
             {
                 LevelRank = game.State.LevelRank,
-                TrumpSuit = game.State.TrumpSuit ?? Suit.Spade
+                TrumpSuit = game.State.TrumpSuit
             };
 
             var aiPlayers = BuildAiPlayers(aiConfig, candidateParameters, opponentParameters, candidateOnEven, seed, _decisionLogger);

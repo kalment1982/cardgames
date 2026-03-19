@@ -192,7 +192,8 @@ namespace TractorGame.Core.AI.V21
                 }
 
                 var top = cards.OrderByDescending(card => RuleAIUtility.GetCardValue(card, _config)).First();
-                bool hasSupport = cards.Count >= 2;
+                // 两张散牌（例如 A+x）过于脆弱，不作为稳定的强门压制信号。
+                bool hasSupport = cards.Count >= 3;
                 if (hasSupport && RuleAIUtility.GetCardValue(top, _config) >= 112)
                     return true;
             }

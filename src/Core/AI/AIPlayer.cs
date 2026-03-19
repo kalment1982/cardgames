@@ -5,6 +5,8 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TractorGame.Core.AI.V21;
+using TractorGame.Core.AI.V30;
+using TractorGame.Core.AI.V30.Follow;
 using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
@@ -55,6 +57,7 @@ namespace TractorGame.Core.AI
         private readonly IGameLogger _decisionLogger;
         private readonly RuleAIOptions _ruleAIOptions;
         private readonly RuleAIContextBuilder _contextBuilder;
+        private readonly RuleAIEngineV30 _ruleAIEngineV30;
         private readonly LeadPolicy2 _leadPolicy2;
         private readonly FollowPolicy2 _followPolicy2;
         private readonly BuryPolicy2 _buryPolicy2;
@@ -78,6 +81,7 @@ namespace TractorGame.Core.AI
             _decisionLogger = decisionLogger ?? GameLoggerFactory.CreateDefault();
             _ruleAIOptions = ruleAIOptions ?? RuleAIOptions.FromEnvironment();
             _contextBuilder = new RuleAIContextBuilder(config, difficulty, _strategy, _memory, seed);
+            _ruleAIEngineV30 = new RuleAIEngineV30(config, difficulty, _memory);
 
             var intentResolver = new IntentResolver(config);
             var actionScorer = new ActionScorer(config);
@@ -178,15 +182,19 @@ namespace TractorGame.Core.AI
             var legacyOutcome = LeadOldPath(safeHand, role, myPosition, opponentPositions, knownBottomCards);
             legacyStopwatch.Stop();
 
+            var decisionTraceId = ResolveDecisionTraceId(context, logContext);
             var shadowStopwatch = Stopwatch.StartNew();
             var shouldCompare = _ruleAIOptions.EnableShadowCompare && ShouldRunShadowCompare();
             DecisionOutcome? newOutcome = null;
-            if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
+            if (_ruleAIOptions.UseRuleAIV30)
+            {
+                newOutcome = LeadV30Path(context, logContext);
+            }
+            else if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
             {
                 newOutcome = LeadNewPath(context);
             }
 
-            var decisionTraceId = ResolveDecisionTraceId(context, logContext);
             var compareSnapshot = BuildCompareSnapshot(legacyOutcome, newOutcome, shouldCompare);
 
             if (compareSnapshot.ShadowCompared)
@@ -194,12 +202,11 @@ namespace TractorGame.Core.AI
 
             shadowStopwatch.Stop();
 
-            var selectedOutcome = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
-                ? newOutcome
+            var useNewPath = (_ruleAIOptions.UseRuleAIV30 || _ruleAIOptions.UseRuleAIV21) && newOutcome != null;
+            DecisionOutcome selectedOutcome = useNewPath
+                ? newOutcome!
                 : legacyOutcome;
-            var selectedPath = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
-                ? newOutcome.Path
-                : legacyOutcome.Path;
+            var selectedPath = selectedOutcome.Path;
 
             totalStopwatch.Stop();
 
@@ -260,6 +267,38 @@ namespace TractorGame.Core.AI
             var safeHand = hand ?? new List<Card>();
             var safeLeadCards = leadCards ?? new List<Card>();
             var totalStopwatch = Stopwatch.StartNew();
+            var effectiveWinningCards = currentWinningCards == null || currentWinningCards.Count == 0
+                ? safeLeadCards
+                : currentWinningCards;
+            var followComparer = new CardComparer(_config);
+            var followValidator = new FollowValidator(_config);
+            var candidateContext = _contextBuilder.BuildFollowContext(
+                safeHand,
+                safeLeadCards,
+                currentWinningCards,
+                role,
+                partnerWinning,
+                trickScore,
+                cardsLeftMin: safeHand.Count,
+                playerIndex: logContext?.PlayerIndex ?? -1,
+                dealerIndex: logContext?.DealerIndex ?? -1,
+                legalActions: null,
+                visibleBottomCards: visibleBottomCards,
+                trickIndex: logContext?.TrickIndex ?? 0,
+                turnIndex: logContext?.TurnIndex ?? 0,
+                playPosition: logContext?.PlayPosition ?? (safeLeadCards.Count == 0 ? 0 : safeLeadCards.Count + 1),
+                currentWinningPlayer: logContext?.CurrentWinningPlayer ?? -1,
+                defenderScore: logContext?.DefenderScore ?? 0,
+                bottomPoints: logContext?.BottomPoints ?? 0);
+            var authoritativeLegalActions = BuildAuthoritativeFollowCandidates(
+                candidateContext,
+                safeHand,
+                safeLeadCards,
+                effectiveWinningCards,
+                role,
+                partnerWinning,
+                followComparer,
+                followValidator);
 
             var contextStopwatch = Stopwatch.StartNew();
             var context = _contextBuilder.BuildFollowContext(
@@ -272,6 +311,7 @@ namespace TractorGame.Core.AI
                 cardsLeftMin: safeHand.Count,
                 playerIndex: logContext?.PlayerIndex ?? -1,
                 dealerIndex: logContext?.DealerIndex ?? -1,
+                legalActions: authoritativeLegalActions,
                 visibleBottomCards: visibleBottomCards,
                 trickIndex: logContext?.TrickIndex ?? 0,
                 turnIndex: logContext?.TurnIndex ?? 0,
@@ -288,7 +328,11 @@ namespace TractorGame.Core.AI
             var shadowStopwatch = Stopwatch.StartNew();
             var shouldCompare = _ruleAIOptions.EnableShadowCompare && ShouldRunShadowCompare();
             DecisionOutcome? newOutcome = null;
-            if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
+            if (_ruleAIOptions.UseRuleAIV30)
+            {
+                newOutcome = FollowV30Path(context, safeHand, safeLeadCards, currentWinningCards, role, partnerWinning);
+            }
+            else if (_ruleAIOptions.UseRuleAIV21 || shouldCompare)
             {
                 newOutcome = FollowNewPath(context, safeHand, safeLeadCards, currentWinningCards, role, partnerWinning);
             }
@@ -301,11 +345,12 @@ namespace TractorGame.Core.AI
 
             shadowStopwatch.Stop();
 
-            var selectedOutcome = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
-                ? newOutcome
+            var useNewPath = (_ruleAIOptions.UseRuleAIV30 || _ruleAIOptions.UseRuleAIV21) && newOutcome != null;
+            DecisionOutcome selectedOutcome = useNewPath
+                ? newOutcome!
                 : legacyOutcome;
-            var selectedPath = _ruleAIOptions.UseRuleAIV21 && newOutcome != null
-                ? newOutcome.Path
+            var selectedPath = useNewPath
+                ? newOutcome!.Path
                 : legacyOutcome.Path;
 
             selectedOutcome = EnsureLegalFollowOutcome(
@@ -618,8 +663,8 @@ namespace TractorGame.Core.AI
                     candidateReasonCodes: null,
                     candidateFeatures: null,
                     explanation: null,
-                    "rule_ai_v21",
-                    "lead");
+                    structuredBundleV30: null,
+                    tags: new[] { "rule_ai_v21", "lead" });
             }
 
             var decision = _leadPolicy2.Decide(context);
@@ -630,6 +675,49 @@ namespace TractorGame.Core.AI
             }
 
             return CreatePolicyOutcome("rule_ai_v21_lead_policy2", decision, "rule_ai_v21", "lead", "scored");
+        }
+
+        private DecisionOutcome LeadV30Path(RuleAIContext context, AIDecisionLogContext? logContext)
+        {
+            if (context.MyHand.Count == 0)
+            {
+                return CreateScoredOutcome(
+                    PhaseKind.Lead,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    "ProbeWeakSuit",
+                    "rule_ai_v30_empty_lead",
+                    "rule_ai_v30_lead_overlay",
+                    new List<double>(),
+                    candidateReasonCodes: null,
+                    candidateFeatures: null,
+                    explanation: null,
+                    structuredBundleV30: null,
+                    tags: new[] { "rule_ai_v30", "lead" });
+            }
+
+            var v21Decision = _leadPolicy2.Decide(context);
+            if (v21Decision.SelectedCards.Count == 0)
+            {
+                var fallback = LeadOldPath(context.MyHand, context.Role, context.PlayerIndex, new List<int>(), context.VisibleBottomCards);
+                return BuildPassthroughOutcome(fallback, "rule_ai_v30_lead_fallback_to_legacy");
+            }
+
+            var overlay = _ruleAIEngineV30.DecideLead(context, v21Decision, logContext);
+            var explanation = BuildLeadV30Explanation(overlay);
+            return CreateScoredOutcome(
+                PhaseKind.Lead,
+                overlay.SelectedCards,
+                overlay.OrderedCandidates,
+                overlay.PrimaryIntent,
+                overlay.SelectedReason,
+                "rule_ai_v30_lead_overlay",
+                    overlay.CandidateScores,
+                    overlay.CandidateReasonCodes,
+                    overlay.CandidateFeatures,
+                    explanation,
+                    overlay.Bundle != null ? ToStructuredElement(overlay.Bundle) : (JsonElement?)null,
+                    tags: new[] { "rule_ai_v30", "lead", "overlay" });
         }
 
         private DecisionOutcome FollowNewPath(
@@ -653,8 +741,8 @@ namespace TractorGame.Core.AI
                     candidateReasonCodes: null,
                     candidateFeatures: null,
                     explanation: null,
-                    "rule_ai_v21",
-                    "follow");
+                    structuredBundleV30: null,
+                    tags: new[] { "rule_ai_v21", "follow" });
             }
 
             var decision = _followPolicy2.Decide(context);
@@ -666,6 +754,99 @@ namespace TractorGame.Core.AI
             }
 
             return CreatePolicyOutcome("rule_ai_v21_follow_policy2", decision, "rule_ai_v21", "follow", "scored");
+        }
+
+        private DecisionOutcome FollowV30Path(
+            RuleAIContext context,
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card>? currentWinningCards,
+            AIRole role,
+            bool partnerWinning)
+        {
+            if (hand == null || hand.Count == 0 || leadCards == null || leadCards.Count == 0)
+            {
+                return CreateScoredOutcome(
+                    PhaseKind.Follow,
+                    new List<Card>(),
+                    new List<List<Card>>(),
+                    "MinimizeLoss",
+                    "rule_ai_v30_empty_follow",
+                    "rule_ai_v30_follow_overlay",
+                    new List<double>(),
+                    candidateReasonCodes: null,
+                    candidateFeatures: null,
+                    explanation: null,
+                    structuredBundleV30: null,
+                    tags: new[] { "rule_ai_v30", "follow" });
+            }
+
+            var decision = _ruleAIEngineV30.DecideFollow(context);
+            if (decision.SelectedCards.Count == 0 && decision.RankedCandidates.Count == 0)
+            {
+                var winningCards = currentWinningCards == null || currentWinningCards.Count == 0 ? leadCards : currentWinningCards;
+                var fallback = FollowOldPath(hand, leadCards, winningCards, role, partnerWinning);
+                return BuildPassthroughOutcome(fallback, "rule_ai_v30_follow_fallback_to_legacy");
+            }
+
+            var candidateFeatures = decision.RankedCandidates
+                .Select(candidate => new Dictionary<string, double>
+                {
+                    ["TrickWinValue"] = candidate.CanBeatCurrentWinner ? 1 : 0,
+                    ["WinSecurityValue"] = candidate.Security switch
+                    {
+                        FollowWinSecurityV30.Lock => 3,
+                        FollowWinSecurityV30.Stable => 2,
+                        _ => 1
+                    },
+                    ["ControlSpendCost"] = candidate.ControlSpendCost,
+                    ["CandidatePoints"] = candidate.CandidatePoints
+                })
+                .ToList();
+
+            var explanation = BuildFollowV30Explanation(decision, candidateFeatures);
+            return CreateScoredOutcome(
+                PhaseKind.Follow,
+                decision.SelectedCards,
+                decision.RankedCandidates.Select(candidate => CloneCards(candidate.Cards)).ToList(),
+                decision.Intent.ToString(),
+                decision.SelectedReason,
+                "rule_ai_v30_follow_overlay",
+                decision.RankedCandidates.Select(candidate => (double)candidate.OverlayScore).ToList(),
+                decision.RankedCandidates.Select(candidate => (string?)candidate.Reason).ToList(),
+                candidateFeatures,
+                explanation,
+                structuredBundleV30: null,
+                tags: new[] { "rule_ai_v30", "follow", "overlay" });
+        }
+
+        private List<List<Card>> BuildAuthoritativeFollowCandidates(
+            RuleAIContext context,
+            List<Card> hand,
+            List<Card> leadCards,
+            List<Card> currentWinningCards,
+            AIRole role,
+            bool partnerWinning,
+            CardComparer comparer,
+            FollowValidator validator)
+        {
+            if (hand.Count == 0 || leadCards.Count == 0)
+                return new List<List<Card>>();
+
+            var generator = new FollowCandidateGenerator(_config);
+            var candidates = generator.Generate(context)
+                .Where(candidate => candidate.Count == leadCards.Count && validator.IsValidFollow(hand, leadCards, candidate))
+                .Select(CloneCards)
+                .ToList();
+
+            if (candidates.Count > 0)
+                return candidates;
+
+            var exhaustive = FindExhaustiveLegalFollowCandidate(hand, leadCards, leadCards.Count, comparer, validator);
+            if (exhaustive != null)
+                return new List<List<Card>> { exhaustive };
+
+            return new List<List<Card>>();
         }
 
         private List<List<Card>> BuildRuleAIV21FollowCandidates(
@@ -979,6 +1160,7 @@ namespace TractorGame.Core.AI
                 source.CandidateReasonCodes,
                 source.CandidateFeatures,
                 source.Explanation,
+                source.StructuredBundleV30,
                 source.Tags.Concat(new[] { "rule_ai_v21_m1", "passthrough" }).Distinct().ToArray());
         }
 
@@ -1016,6 +1198,7 @@ namespace TractorGame.Core.AI
             IEnumerable<string?>? candidateReasonCodes = null,
             IEnumerable<Dictionary<string, double>>? candidateFeatures = null,
             DecisionExplanation? explanation = null,
+            JsonElement? structuredBundleV30 = null,
             params string[] tags)
         {
             return new DecisionOutcome
@@ -1031,7 +1214,8 @@ namespace TractorGame.Core.AI
                 CandidateFeatures = candidateFeatures?.Select(features => new Dictionary<string, double>(features)).ToList()
                     ?? new List<Dictionary<string, double>>(),
                 Tags = tags.Where(tag => !string.IsNullOrWhiteSpace(tag)).Distinct().ToList(),
-                Explanation = explanation
+                Explanation = explanation,
+                StructuredBundleV30 = structuredBundleV30
             };
         }
 
@@ -1053,6 +1237,83 @@ namespace TractorGame.Core.AI
                 CandidateFeatures = decision.ScoredActions.Select(action => new Dictionary<string, double>(action.Features)).ToList(),
                 Tags = tags.Where(tag => !string.IsNullOrWhiteSpace(tag)).Distinct().ToList(),
                 Explanation = decision.Explanation
+            };
+        }
+
+        private static DecisionExplanation BuildLeadV30Explanation(LeadOverlayDecisionV30 overlay)
+        {
+            var topCandidates = overlay.OrderedCandidates
+                .Take(3)
+                .Select(cards => string.Join(" ", cards.Select(card => card.ToString())))
+                .ToList();
+
+            var selectedKey = string.Join(" ", overlay.SelectedCards.Select(card => card.ToString()));
+            var selectedFeatures = new Dictionary<string, double>();
+            for (int index = 0; index < overlay.OrderedCandidates.Count && index < overlay.CandidateFeatures.Count; index++)
+            {
+                var key = string.Join(" ", overlay.OrderedCandidates[index].Select(card => card.ToString()));
+                if (!string.Equals(key, selectedKey, StringComparison.Ordinal))
+                    continue;
+
+                selectedFeatures = new Dictionary<string, double>(overlay.CandidateFeatures[index]);
+                break;
+            }
+
+            return new DecisionExplanation
+            {
+                Phase = PhaseKind.Lead,
+                PhasePolicy = "RuleAIEngineV30",
+                PrimaryIntent = overlay.PrimaryIntent,
+                SecondaryIntent = overlay.SecondaryIntent,
+                SelectedReason = overlay.SelectedReason,
+                CandidateCount = overlay.OrderedCandidates.Count,
+                TopCandidates = topCandidates,
+                TopScores = overlay.CandidateScores.Take(3).ToList(),
+                SelectedAction = overlay.SelectedCards.Select(card => card.ToString()).ToList(),
+                Tags = new List<string> { "rule_ai_v30", "lead_overlay", overlay.SelectedCandidateId }
+                    .Concat(overlay.TriggeredRules)
+                    .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                    .Distinct()
+                    .ToList(),
+                CandidateFeatures = overlay.CandidateFeatures.Select(features => new Dictionary<string, double>(features)).ToList(),
+                SelectedActionFeatures = selectedFeatures
+            };
+        }
+
+        private static DecisionExplanation BuildFollowV30Explanation(
+            FollowDecisionV30 decision,
+            IReadOnlyList<Dictionary<string, double>> candidateFeatures)
+        {
+            var topCandidates = decision.RankedCandidates
+                .Take(3)
+                .Select(candidate => string.Join(" ", candidate.Cards.Select(card => card.ToString())))
+                .ToList();
+
+            var selectedKey = string.Join(" ", decision.SelectedCards.Select(card => card.ToString()));
+            var selectedFeatures = new Dictionary<string, double>();
+            for (int index = 0; index < decision.RankedCandidates.Count && index < candidateFeatures.Count; index++)
+            {
+                var key = string.Join(" ", decision.RankedCandidates[index].Cards.Select(card => card.ToString()));
+                if (!string.Equals(key, selectedKey, StringComparison.Ordinal))
+                    continue;
+
+                selectedFeatures = new Dictionary<string, double>(candidateFeatures[index]);
+                break;
+            }
+
+            return new DecisionExplanation
+            {
+                Phase = PhaseKind.Follow,
+                PhasePolicy = "RuleAIEngineV30",
+                PrimaryIntent = decision.Intent.ToString(),
+                SelectedReason = decision.SelectedReason,
+                CandidateCount = decision.RankedCandidates.Count,
+                TopCandidates = topCandidates,
+                TopScores = decision.RankedCandidates.Take(3).Select(candidate => (double)candidate.OverlayScore).ToList(),
+                SelectedAction = decision.SelectedCards.Select(card => card.ToString()).ToList(),
+                Tags = new List<string> { "rule_ai_v30", "follow_overlay", decision.Intent.ToString() },
+                CandidateFeatures = candidateFeatures.Select(features => new Dictionary<string, double>(features)).ToList(),
+                SelectedActionFeatures = selectedFeatures
             };
         }
 
@@ -1134,6 +1395,8 @@ namespace TractorGame.Core.AI
             string decisionTraceId)
         {
             var explanation = BuildDecisionExplanation(context, outcome);
+            var selectedCandidateId = GetBundleV30String(outcome.StructuredBundleV30, "selected_candidate_id");
+            var triggeredRules = GetBundleV30StringList(outcome.StructuredBundleV30, "triggered_rules");
             var entry = CreateAiLogEntry("ai.decision", LogCategories.Decision, context, logContext, decisionTraceId);
             int winningCandidateCount = outcome.CandidateFeatures.Count == outcome.Candidates.Count
                 ? outcome.CandidateFeatures.Count(features => features.GetValueOrDefault("TrickWinValue") > 0)
@@ -1152,6 +1415,7 @@ namespace TractorGame.Core.AI
                 ["decision_trace_id"] = decisionTraceId,
                 ["phase"] = context.Phase.ToString(),
                 ["path"] = path,
+                ["use_rule_ai_v30"] = _ruleAIOptions.UseRuleAIV30,
                 ["phase_policy"] = explanation.PhasePolicy,
                 ["difficulty"] = _difficulty.ToString(),
                 ["player_index"] = ResolvePlayerIndex(context, logContext),
@@ -1159,7 +1423,9 @@ namespace TractorGame.Core.AI
                 ["partner_winning"] = context.PartnerWinning,
                 ["primary_intent"] = explanation.PrimaryIntent,
                 ["secondary_intent"] = explanation.SecondaryIntent,
+                ["selected_candidate_id"] = selectedCandidateId,
                 ["selected_reason"] = explanation.SelectedReason,
+                ["triggered_rules"] = triggeredRules,
                 ["candidate_count"] = explanation.CandidateCount,
                 ["selected_cards"] = BuildCardPayload(outcome.SelectedCards),
                 ["top_candidates"] = explanation.TopCandidates,
@@ -1189,6 +1455,38 @@ namespace TractorGame.Core.AI
             };
 
             _decisionLogger.Log(entry);
+        }
+
+        private static string? GetBundleV30String(JsonElement? bundle, string propertyName)
+        {
+            if (bundle == null || bundle.Value.ValueKind != JsonValueKind.Object)
+                return null;
+
+            return bundle.Value.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+        }
+
+        private static List<string> GetBundleV30StringList(JsonElement? bundle, string propertyName)
+        {
+            var result = new List<string>();
+            if (bundle == null || bundle.Value.ValueKind != JsonValueKind.Object)
+                return result;
+
+            if (!bundle.Value.TryGetProperty(propertyName, out var value) || value.ValueKind != JsonValueKind.Array)
+                return result;
+
+            foreach (var item in value.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var text = item.GetString();
+                if (!string.IsNullOrWhiteSpace(text))
+                    result.Add(text);
+            }
+
+            return result;
         }
 
         private void LogAiCompare(
@@ -1304,7 +1602,8 @@ namespace TractorGame.Core.AI
                     ["perf_snapshot"] = BuildPerfSnapshotPayload(outcome, totalMs, contextMs, legacyMs, shadowMs),
                     ["truth_snapshot"] = BuildTruthSnapshot(logContext),
                     ["algorithm_trace"] = BuildAlgorithmTrace(context, explanation, path, compareSnapshot, candidateDetails.Count)
-                }
+                },
+                ["bundle_v30"] = outcome.StructuredBundleV30
             };
             entry.Metrics = new Dictionary<string, double>
             {
@@ -1652,6 +1951,7 @@ namespace TractorGame.Core.AI
                 ["policy_module"] = string.IsNullOrWhiteSpace(explanation.PhasePolicy) ? path : explanation.PhasePolicy,
                 ["path"] = path,
                 ["phase"] = context.Phase.ToString(),
+                ["use_rule_ai_v30"] = _ruleAIOptions.UseRuleAIV30,
                 ["use_rule_ai_v21"] = _ruleAIOptions.UseRuleAIV21,
                 ["shadow_compare_enabled"] = _ruleAIOptions.EnableShadowCompare,
                 ["shadow_compared"] = compareSnapshot.ShadowCompared,
@@ -2885,6 +3185,8 @@ namespace TractorGame.Core.AI
             public List<string> Tags { get; init; } = new();
 
             public DecisionExplanation? Explanation { get; init; }
+
+            public JsonElement? StructuredBundleV30 { get; init; }
         }
 
         private sealed class DecisionCompareSnapshot

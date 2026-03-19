@@ -275,6 +275,8 @@ namespace TractorGame.Core.AI.V21
                 DecisionIntentKind.PassToMate =>
                     features.GetValueOrDefault("MateSyncValue") * 2.40 -
                     features.GetValueOrDefault("TrickWinValue") * 2.20 -
+                    features.GetValueOrDefault("WinSecurityValue") * 0.90 -
+                    features.GetValueOrDefault("HighControlLossCost") * 1.10 -
                     features.GetValueOrDefault("TrumpConsumptionCost") * 0.80,
                 DecisionIntentKind.TakeScore =>
                     features.GetValueOrDefault("TrickWinValue") * 1.80 +
@@ -321,7 +323,9 @@ namespace TractorGame.Core.AI.V21
                     candidate.Count == 3 ? 3.50 :
                     -4.50,
                 DecisionIntentKind.MinimizeLoss =>
-                    -features.GetValueOrDefault("TrumpConsumptionCost") * 1.60 -
+                    -features.GetValueOrDefault("TrickWinValue") * 3.20 -
+                    features.GetValueOrDefault("WinSecurityValue") * 0.90 -
+                    features.GetValueOrDefault("TrumpConsumptionCost") * 1.60 -
                     features.GetValueOrDefault("HighControlLossCost") * 1.20 -
                     features.GetValueOrDefault("StructureBreakCost") * 0.60 -
                     features.GetValueOrDefault("DiscardRankCost") * 0.55 -
@@ -447,6 +451,17 @@ namespace TractorGame.Core.AI.V21
 
         private bool ShouldUseSecurityFloorOrdering(RuleAIContext context, ResolvedIntent intent)
         {
+            bool zeroPointLowRiskEndgame =
+                context.Phase == PhaseKind.Follow &&
+                context.TrickScore == 0 &&
+                (intent.PrimaryIntent == DecisionIntentKind.ProtectBottom ||
+                 intent.PrimaryIntent == DecisionIntentKind.PrepareEndgame) &&
+                context.DecisionFrame.BottomRiskPressure < RiskLevel.High &&
+                context.DecisionFrame.DealerRetentionRisk < RiskLevel.High;
+
+            if (zeroPointLowRiskEndgame)
+                return false;
+
             return context.Phase == PhaseKind.Follow &&
                 (intent.PrimaryIntent == DecisionIntentKind.TakeScore ||
                  intent.PrimaryIntent == DecisionIntentKind.ProtectBottom ||

@@ -161,10 +161,12 @@ namespace TractorGame.Core.AI.V21
             if (context.DecisionFrame.EndgameLevel != EndgameLevel.None)
                 return scored;
 
-            if (context.DecisionFrame.TrickIndex > 2)
+            bool hasKnownTopSideSuitCandidate = scored.Any(action => GetWinningPriorityBucket(context, action, config) >= 4);
+            if (context.DecisionFrame.TrickIndex > 2 && !hasKnownTopSideSuitCandidate)
                 return scored;
 
-            if (!IsLowSidePairPressureLead(scored[0], config))
+            if (!IsLowSidePairPressureLead(scored[0], config) &&
+                !IsLowSideSinglePressureLead(scored[0], config))
                 return scored;
 
             int topPriority = GetWinningPriorityBucket(context, scored[0], config);
@@ -538,6 +540,21 @@ namespace TractorGame.Core.AI.V21
                 return false;
 
             return action.Cards[0].Rank <= Rank.Ten;
+        }
+
+        private static bool IsLowSideSinglePressureLead(ScoredAction action, GameConfig config)
+        {
+            if (action.Cards.Count != 1)
+                return false;
+
+            var card = action.Cards[0];
+            if (config.IsTrump(card))
+                return false;
+
+            if (RuleAIUtility.GetCardValue(card, config) > 110 && card.Score == 0)
+                return false;
+
+            return true;
         }
 
         private static bool IsKnownTopSideSuitAction(

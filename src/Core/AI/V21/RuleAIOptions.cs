@@ -8,6 +8,8 @@ namespace TractorGame.Core.AI.V21
     /// </summary>
     public sealed class RuleAIOptions
     {
+        public bool UseRuleAIV30 { get; init; } = false;
+
         public bool UseRuleAIV21 { get; init; } = true;
 
         public bool EnableShadowCompare { get; init; } = true;
@@ -28,6 +30,7 @@ namespace TractorGame.Core.AI.V21
         public static RuleAIOptions FromEnvironment()
         {
             return Create(
+                useRuleAIV30: ReadBool("TRACTOR_RULE_AI_V30_USE_NEW_PATH"),
                 useRuleAIV21: ReadBool("TRACTOR_RULE_AI_V21_USE_NEW_PATH"),
                 enableShadowCompare: ReadBool("TRACTOR_RULE_AI_V21_SHADOW_MODE"),
                 shadowSampleRate: ReadRate("TRACTOR_RULE_AI_V21_SHADOW_RATE"),
@@ -37,6 +40,7 @@ namespace TractorGame.Core.AI.V21
         }
 
         public static RuleAIOptions Create(
+            bool? useRuleAIV30 = null,
             bool? useRuleAIV21 = null,
             bool? enableShadowCompare = null,
             double? shadowSampleRate = null,
@@ -49,6 +53,7 @@ namespace TractorGame.Core.AI.V21
 
             return new RuleAIOptions
             {
+                UseRuleAIV30 = useRuleAIV30 ?? fallback.UseRuleAIV30,
                 UseRuleAIV21 = useRuleAIV21 ?? fallback.UseRuleAIV21,
                 EnableShadowCompare = enableShadowCompare ?? fallback.EnableShadowCompare,
                 ShadowSampleRate = ClampRate(shadowSampleRate ?? fallback.ShadowSampleRate),

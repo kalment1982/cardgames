@@ -8,6 +8,7 @@ namespace TractorGame.Tests.V21
         [Fact]
         public void FromEnvironment_ParsesBooleanAndRate()
         {
+            const string useV30Name = "TRACTOR_RULE_AI_V30_USE_NEW_PATH";
             const string useName = "TRACTOR_RULE_AI_V21_USE_NEW_PATH";
             const string shadowName = "TRACTOR_RULE_AI_V21_SHADOW_MODE";
             const string rateName = "TRACTOR_RULE_AI_V21_SHADOW_RATE";
@@ -15,6 +16,7 @@ namespace TractorGame.Tests.V21
             const string truthName = "TRACTOR_RULE_AI_V21_DECISION_TRACE_INCLUDE_TRUTH";
             const string candidateLimitName = "TRACTOR_RULE_AI_V21_DECISION_TRACE_MAX_CANDIDATES";
 
+            var oldUseV30 = System.Environment.GetEnvironmentVariable(useV30Name);
             var oldUse = System.Environment.GetEnvironmentVariable(useName);
             var oldShadow = System.Environment.GetEnvironmentVariable(shadowName);
             var oldRate = System.Environment.GetEnvironmentVariable(rateName);
@@ -23,6 +25,7 @@ namespace TractorGame.Tests.V21
             var oldCandidateLimit = System.Environment.GetEnvironmentVariable(candidateLimitName);
             try
             {
+                System.Environment.SetEnvironmentVariable(useV30Name, "true");
                 System.Environment.SetEnvironmentVariable(useName, "true");
                 System.Environment.SetEnvironmentVariable(shadowName, "false");
                 System.Environment.SetEnvironmentVariable(rateName, "0.25");
@@ -32,6 +35,7 @@ namespace TractorGame.Tests.V21
 
                 var options = RuleAIOptions.FromEnvironment();
 
+                Assert.True(options.UseRuleAIV30);
                 Assert.True(options.UseRuleAIV21);
                 Assert.False(options.EnableShadowCompare);
                 Assert.Equal(0.25, options.ShadowSampleRate);
@@ -41,6 +45,7 @@ namespace TractorGame.Tests.V21
             }
             finally
             {
+                System.Environment.SetEnvironmentVariable(useV30Name, oldUseV30);
                 System.Environment.SetEnvironmentVariable(useName, oldUse);
                 System.Environment.SetEnvironmentVariable(shadowName, oldShadow);
                 System.Environment.SetEnvironmentVariable(rateName, oldRate);
@@ -53,6 +58,7 @@ namespace TractorGame.Tests.V21
         [Fact]
         public void FromEnvironment_DefaultsToV21WhenUnset()
         {
+            const string useV30Name = "TRACTOR_RULE_AI_V30_USE_NEW_PATH";
             const string useName = "TRACTOR_RULE_AI_V21_USE_NEW_PATH";
             const string shadowName = "TRACTOR_RULE_AI_V21_SHADOW_MODE";
             const string rateName = "TRACTOR_RULE_AI_V21_SHADOW_RATE";
@@ -60,6 +66,7 @@ namespace TractorGame.Tests.V21
             const string truthName = "TRACTOR_RULE_AI_V21_DECISION_TRACE_INCLUDE_TRUTH";
             const string candidateLimitName = "TRACTOR_RULE_AI_V21_DECISION_TRACE_MAX_CANDIDATES";
 
+            var oldUseV30 = System.Environment.GetEnvironmentVariable(useV30Name);
             var oldUse = System.Environment.GetEnvironmentVariable(useName);
             var oldShadow = System.Environment.GetEnvironmentVariable(shadowName);
             var oldRate = System.Environment.GetEnvironmentVariable(rateName);
@@ -68,6 +75,7 @@ namespace TractorGame.Tests.V21
             var oldCandidateLimit = System.Environment.GetEnvironmentVariable(candidateLimitName);
             try
             {
+                System.Environment.SetEnvironmentVariable(useV30Name, null);
                 System.Environment.SetEnvironmentVariable(useName, null);
                 System.Environment.SetEnvironmentVariable(shadowName, null);
                 System.Environment.SetEnvironmentVariable(rateName, null);
@@ -77,6 +85,7 @@ namespace TractorGame.Tests.V21
 
                 var options = RuleAIOptions.FromEnvironment();
 
+                Assert.False(options.UseRuleAIV30);
                 Assert.True(options.UseRuleAIV21);
                 Assert.True(options.EnableShadowCompare);
                 Assert.Equal(1.0, options.ShadowSampleRate);
@@ -86,6 +95,7 @@ namespace TractorGame.Tests.V21
             }
             finally
             {
+                System.Environment.SetEnvironmentVariable(useV30Name, oldUseV30);
                 System.Environment.SetEnvironmentVariable(useName, oldUse);
                 System.Environment.SetEnvironmentVariable(shadowName, oldShadow);
                 System.Environment.SetEnvironmentVariable(rateName, oldRate);
@@ -100,6 +110,7 @@ namespace TractorGame.Tests.V21
         {
             var fallback = new RuleAIOptions
             {
+                UseRuleAIV30 = false,
                 UseRuleAIV21 = true,
                 EnableShadowCompare = true,
                 ShadowSampleRate = 0.6,
@@ -109,6 +120,7 @@ namespace TractorGame.Tests.V21
             };
 
             var options = RuleAIOptions.Create(
+                useRuleAIV30: true,
                 useRuleAIV21: false,
                 enableShadowCompare: false,
                 shadowSampleRate: 2.5,
@@ -117,6 +129,7 @@ namespace TractorGame.Tests.V21
                 decisionTraceMaxCandidates: -9,
                 fallback: fallback);
 
+            Assert.True(options.UseRuleAIV30);
             Assert.False(options.UseRuleAIV21);
             Assert.False(options.EnableShadowCompare);
             Assert.Equal(1.0, options.ShadowSampleRate);

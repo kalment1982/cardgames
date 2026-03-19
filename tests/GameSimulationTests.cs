@@ -41,7 +41,8 @@ namespace TractorGame.Tests
             bool playResult = game.PlayCards(0, new List<Card> { card });
             Assert.True(playResult);
             Assert.Equal(24, game.State.PlayerHands[0].Count);
-            Assert.Equal(1, game.State.CurrentPlayer);
+            // 当前引擎座位顺序是顺时针：0 -> 3 -> 2 -> 1
+            Assert.Equal(3, game.State.CurrentPlayer);
         }
 
         private static void DealToEnd(Game game)

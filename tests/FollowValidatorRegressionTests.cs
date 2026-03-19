@@ -468,5 +468,64 @@ namespace TractorGame.Tests
 
             Assert.True(result.Success);
         }
+
+        [Fact]
+        public void IsValidFollow_TrumpJokerMixedLead_AllowsThreeTrumpSingles_WhenNoExactTrumpPairExists()
+        {
+            var config = new GameConfig
+            {
+                LevelRank = Rank.Two,
+                TrumpSuit = Suit.Spade
+            };
+            var validator = new FollowValidator(config);
+
+            var lead = new List<Card>
+            {
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.SmallJoker),
+                new Card(Suit.Joker, Rank.BigJoker)
+            };
+            var hand = new List<Card>
+            {
+                new Card(Suit.Club, Rank.Two),
+                new Card(Suit.Heart, Rank.Two),
+                new Card(Suit.Spade, Rank.Queen),
+                new Card(Suit.Spade, Rank.Ten),
+                new Card(Suit.Spade, Rank.Nine),
+                new Card(Suit.Spade, Rank.Six),
+                new Card(Suit.Spade, Rank.Five),
+                new Card(Suit.Spade, Rank.Three),
+                new Card(Suit.Club, Rank.Eight),
+                new Card(Suit.Heart, Rank.Seven),
+                new Card(Suit.Heart, Rank.Six),
+                new Card(Suit.Heart, Rank.Four),
+                new Card(Suit.Heart, Rank.Three),
+                new Card(Suit.Diamond, Rank.Ace),
+                new Card(Suit.Diamond, Rank.Jack),
+                new Card(Suit.Diamond, Rank.Three),
+                new Card(Suit.Heart, Rank.Jack),
+                new Card(Suit.Heart, Rank.Ten),
+                new Card(Suit.Club, Rank.Jack),
+                new Card(Suit.Heart, Rank.Ten)
+            };
+            var follow = new List<Card>
+            {
+                new Card(Suit.Spade, Rank.Three),
+                new Card(Suit.Spade, Rank.Six),
+                new Card(Suit.Spade, Rank.Nine)
+            };
+            var alternateFollow = new List<Card>
+            {
+                new Card(Suit.Spade, Rank.Six),
+                new Card(Suit.Spade, Rank.Nine),
+                new Card(Suit.Spade, Rank.Queen)
+            };
+
+            var result = validator.IsValidFollowEx(hand, lead, follow);
+            var alternateResult = validator.IsValidFollowEx(hand, lead, alternateFollow);
+
+            Assert.True(result.Success, result.ReasonCode);
+            Assert.True(alternateResult.Success, alternateResult.ReasonCode);
+        }
     }
 }

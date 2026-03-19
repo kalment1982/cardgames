@@ -110,7 +110,7 @@ namespace TractorGame.Tests.V21
                 var config = new GameConfig
                 {
                     LevelRank = game.State.LevelRank,
-                    TrumpSuit = game.State.TrumpSuit ?? Suit.Spade
+                    TrumpSuit = game.State.TrumpSuit
                 };
 
                 var v21Options = new RuleAIOptions { UseRuleAIV21 = true, EnableShadowCompare = false };

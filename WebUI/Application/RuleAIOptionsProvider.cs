@@ -11,6 +11,7 @@ public sealed class RuleAIOptionsProvider
     {
         var section = configuration.GetSection("RuleAI");
         Options = RuleAIOptions.Create(
+            useRuleAIV30: ReadBool(section, "UseRuleAIV30"),
             useRuleAIV21: ReadBool(section, "UseRuleAIV21"),
             enableShadowCompare: ReadBool(section, "EnableShadowCompare"),
             shadowSampleRate: ReadRate(section, "ShadowSampleRate"),

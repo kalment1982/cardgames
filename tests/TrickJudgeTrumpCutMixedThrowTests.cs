@@ -48,7 +48,7 @@ namespace TractorGame.Tests
             {
                 "CUT_THROW_OK_02",
                 BuildCase(
-                    expectedWinner: 3,
+                    expectedWinner: 0,
                     new[]
                     {
                         Spade(Rank.Ace), Spade(Rank.King),

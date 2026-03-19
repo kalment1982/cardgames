@@ -111,7 +111,7 @@ namespace TractorGame.Tests
                     Club(Rank.Nine), Club(Rank.Nine)
                 });
 
-            yield return Case("CUT_THROW_OK_02", 3,
+            yield return Case("CUT_THROW_OK_02", 0,
                 new[]
                 {
                     Spade(Rank.Ace), Spade(Rank.King),

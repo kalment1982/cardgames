@@ -1,0 +1,11 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://codeflow.asia",
+    "ANTHROPIC_AUTH_TOKEN": "sk-EVJLm34Itk8QCV4oe7VJzIq3Wn09PgzUHe7I1jErP34wYoGo"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "model": "opus"
+}

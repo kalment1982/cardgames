@@ -377,7 +377,8 @@ namespace TractorGame.Tests
 
             Assert.True(game.PlayCards(0, play));
             Assert.Empty(game.State.PlayerHands[0]);
-            Assert.Equal(1, game.State.CurrentPlayer);
+            // 当前引擎座位顺序是顺时针：0 -> 3 -> 2 -> 1
+            Assert.Equal(3, game.State.CurrentPlayer);
         }
 
         [Fact]
@@ -387,14 +388,14 @@ namespace TractorGame.Tests
             game.State.Phase = GamePhase.Playing;
             game.State.CurrentPlayer = 0;
             game.State.PlayerHands[0] = new List<Card> { new Card(Suit.Spade, Rank.Ace) };
-            game.State.PlayerHands[1] = new List<Card> { new Card(Suit.Spade, Rank.Ace) };
+            game.State.PlayerHands[3] = new List<Card> { new Card(Suit.Spade, Rank.Ace) };
 
             var lead = new List<Card> { new Card(Suit.Spade, Rank.Ace) };
             var follow = new List<Card> { new Card(Suit.Spade, Rank.Ace) };
 
             Assert.True(game.PlayCards(0, lead));
-            Assert.True(game.PlayCards(1, follow));
-            Assert.Empty(game.State.PlayerHands[1]);
+            Assert.True(game.PlayCards(3, follow));
+            Assert.Empty(game.State.PlayerHands[3]);
             Assert.Equal(2, game.State.CurrentPlayer);
         }
     }
