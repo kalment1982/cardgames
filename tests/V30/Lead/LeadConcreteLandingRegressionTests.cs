@@ -158,23 +158,20 @@ namespace TractorGame.Tests.V30.Lead
                 new Card(Suit.Club, Rank.Seven),
                 new Card(Suit.Spade, Rank.Five),
                 new Card(Suit.Club, Rank.Two)
-            });
-            context = context with
+            },
+            handProfileOverride: new HandProfile
             {
-                HandProfile = new HandProfile
+                TrumpCount = 1,
+                HighTrumpCount = 0,
+                ScoreCardCount = 0,
+                SuitLengths = new Dictionary<Suit, int>
                 {
-                    TrumpCount = 1,
-                    HighTrumpCount = 0,
-                    ScoreCardCount = 0,
-                    SuitLengths = new Dictionary<Suit, int>
-                    {
-                        [Suit.Club] = 4,
-                        [Suit.Diamond] = 1,
-                        [Suit.Heart] = 1
-                    },
-                    PotentialVoidTargets = new List<Suit> { Suit.Club }
-                }
-            };
+                    [Suit.Club] = 4,
+                    [Suit.Diamond] = 1,
+                    [Suit.Heart] = 1
+                },
+                PotentialVoidTargets = new List<Suit> { Suit.Club }
+            });
 
             var decision = new PhaseDecision
             {
@@ -289,7 +286,8 @@ namespace TractorGame.Tests.V30.Lead
             AIRole role,
             int playerIndex,
             int trickIndex,
-            List<Card> hand)
+            List<Card> hand,
+            HandProfile? handProfileOverride = null)
         {
             return new RuleAIContext
             {
@@ -303,7 +301,7 @@ namespace TractorGame.Tests.V30.Lead
                 RuleProfile = RuleProfile.FromConfig(config),
                 DifficultyProfile = DifficultyProfile.From(AIDifficulty.Hard),
                 StyleProfile = StyleProfile.Create(23),
-                HandProfile = new HandProfile
+                HandProfile = handProfileOverride ?? new HandProfile
                 {
                     TrumpCount = hand.FindAll(config.IsTrump).Count,
                     HighTrumpCount = 0,
