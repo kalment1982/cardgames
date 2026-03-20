@@ -8,6 +8,17 @@ namespace TractorGame.Core.AI.V30.Follow
 {
     public sealed class FollowCandidateOverlayV30
     {
+        private sealed class CandidateMetrics
+        {
+            public List<Card> Cards { get; init; } = new();
+            public bool CanBeatCurrentWinner { get; init; }
+            public FollowWinSecurityV30 Security { get; init; } = FollowWinSecurityV30.Fragile;
+            public int ControlSpendCost { get; init; }
+            public int CandidatePoints { get; init; }
+            public int DiscardStrengthCost { get; init; }
+            public int HighControlCount { get; init; }
+        }
+
         public List<FollowCandidateViewV30> BuildAndRank(
             RuleAIContext context,
             IReadOnlyList<List<Card>> legalCandidates)
@@ -17,9 +28,17 @@ namespace TractorGame.Core.AI.V30.Follow
                 ? context.CurrentWinningCards
                 : context.LeadCards;
 
-            var views = legalCandidates
+            var metrics = legalCandidates
                 .Where(candidate => candidate != null && candidate.Count == context.LeadCards.Count)
-                .Select(candidate => BuildView(context, currentWinning, candidate, comparer))
+                .Select(candidate => BuildMetrics(context, currentWinning, candidate, comparer))
+                .ToList();
+            bool rearOpponentThreatHigh = context.PartnerWinning &&
+                HasHighRearOpponentThreat(context, currentWinning);
+            bool tempoReclaimMode = ShouldActivateTempoReclaim(context, metrics);
+            var intent = ResolveIntent(context, metrics, tempoReclaimMode);
+
+            var views = metrics
+                .Select(metric => BuildView(context, metric, intent, rearOpponentThreatHigh, tempoReclaimMode))
                 .ToList();
 
             return views
@@ -27,6 +46,7 @@ namespace TractorGame.Core.AI.V30.Follow
                 .ThenBy(view => view.ControlSpendCost)
                 .ThenBy(view => view.CanBeatCurrentWinner ? view.CandidatePoints : 0)
                 .ThenBy(view => view.CandidatePoints)
+                .ThenBy(view => ShouldPreferPassiveDiscardTieBreak(context, view) ? view.DiscardStrengthCost : int.MinValue)
                 .ThenBy(view => RuleAIUtility.BuildCandidateKey(view.Cards))
                 .ToList();
         }
@@ -39,12 +59,46 @@ namespace TractorGame.Core.AI.V30.Follow
             if (ranked.Count == 0)
                 return FollowOverlayIntentV30.MinimizeLoss;
 
-            return ranked[0].CanBeatCurrentWinner
-                ? FollowOverlayIntentV30.TakeScore
+            if (ranked[0].CanBeatCurrentWinner)
+            {
+                if (context.TrickScore == 0 &&
+                    IsDealerSide(context) &&
+                    ranked[0].ControlSpendCost <= 14 &&
+                    ranked[0].DiscardStrengthCost <= 24 &&
+                    (context.DecisionFrame.PlayPosition >= 3 || context.CardsLeftMin <= 8))
+                {
+                    return FollowOverlayIntentV30.TakeLead;
+                }
+
+                return FollowOverlayIntentV30.TakeScore;
+            }
+
+            return ShouldUsePrepareEndgameIntent(context)
+                ? FollowOverlayIntentV30.PrepareEndgame
                 : FollowOverlayIntentV30.MinimizeLoss;
         }
 
-        private FollowCandidateViewV30 BuildView(
+        private static FollowOverlayIntentV30 ResolveIntent(
+            RuleAIContext context,
+            IReadOnlyList<CandidateMetrics> metrics,
+            bool tempoReclaimMode)
+        {
+            if (context.PartnerWinning)
+                return FollowOverlayIntentV30.PassToMate;
+
+            bool hasWinningCandidate = metrics.Any(metric => metric.CanBeatCurrentWinner);
+            if (tempoReclaimMode && hasWinningCandidate)
+                return FollowOverlayIntentV30.TakeLead;
+
+            if (hasWinningCandidate && context.TrickScore >= 5)
+                return FollowOverlayIntentV30.TakeScore;
+
+            return ShouldUsePrepareEndgameIntent(context)
+                ? FollowOverlayIntentV30.PrepareEndgame
+                : FollowOverlayIntentV30.MinimizeLoss;
+        }
+
+        private CandidateMetrics BuildMetrics(
             RuleAIContext context,
             List<Card> currentWinning,
             List<Card> candidate,
@@ -54,31 +108,42 @@ namespace TractorGame.Core.AI.V30.Follow
             int points = candidate.Sum(card => card.Score);
             int controlSpend = EstimateControlSpendCost(context, candidate, comparer);
             int highControlCount = RuleAIUtility.CountHighControlCards(context.GameConfig, candidate);
+            int discardStrengthCost = EstimateDiscardStrengthCost(context, candidate);
             int margin = canBeat
                 ? RuleAIUtility.CalculateWinMargin(context.GameConfig, candidate, currentWinning, comparer)
                 : 0;
 
-            var security = ResolveSecurity(margin);
-            bool rearOpponentThreatHigh = context.PartnerWinning &&
-                HasHighRearOpponentThreat(context, currentWinning);
-            int score = ScoreCandidate(
-                context,
-                canBeat,
-                security,
-                points,
-                controlSpend,
-                highControlCount,
-                rearOpponentThreatHigh);
-            string reason = BuildReason(context, canBeat, security, points, controlSpend, rearOpponentThreatHigh);
-
-            return new FollowCandidateViewV30
+            return new CandidateMetrics
             {
                 Cards = new List<Card>(candidate),
                 CanBeatCurrentWinner = canBeat,
-                Security = security,
-                OverlayScore = score,
+                Security = ResolveSecurity(margin),
                 ControlSpendCost = controlSpend,
                 CandidatePoints = points,
+                DiscardStrengthCost = discardStrengthCost,
+                HighControlCount = highControlCount
+            };
+        }
+
+        private static FollowCandidateViewV30 BuildView(
+            RuleAIContext context,
+            CandidateMetrics metric,
+            FollowOverlayIntentV30 intent,
+            bool rearOpponentThreatHigh,
+            bool tempoReclaimMode)
+        {
+            int score = ScoreCandidate(context, intent, metric, rearOpponentThreatHigh, tempoReclaimMode);
+            string reason = BuildReason(intent, metric, rearOpponentThreatHigh);
+
+            return new FollowCandidateViewV30
+            {
+                Cards = new List<Card>(metric.Cards),
+                CanBeatCurrentWinner = metric.CanBeatCurrentWinner,
+                Security = metric.Security,
+                OverlayScore = score,
+                ControlSpendCost = metric.ControlSpendCost,
+                CandidatePoints = metric.CandidatePoints,
+                DiscardStrengthCost = metric.DiscardStrengthCost,
                 Reason = reason
             };
         }
@@ -100,17 +165,62 @@ namespace TractorGame.Core.AI.V30.Follow
             return structureLoss + highControlCount * 18 + trumpCount * 6;
         }
 
+        private static int EstimateDiscardStrengthCost(RuleAIContext context, IReadOnlyList<Card> candidate)
+        {
+            int cost = 0;
+            foreach (var card in candidate)
+            {
+                cost += card.Rank switch
+                {
+                    Rank.Two => 2,
+                    Rank.Three => 3,
+                    Rank.Four => 4,
+                    Rank.Five => 5,
+                    Rank.Six => 6,
+                    Rank.Seven => 7,
+                    Rank.Eight => 8,
+                    Rank.Nine => 9,
+                    Rank.Ten => 10,
+                    Rank.Jack => 11,
+                    Rank.Queen => 14,
+                    Rank.King => 16,
+                    Rank.Ace => 18,
+                    Rank.SmallJoker => 24,
+                    Rank.BigJoker => 28,
+                    _ => 0
+                };
+
+                if (context.GameConfig.IsTrump(card))
+                    cost += 12;
+
+                if (card.Score > 0)
+                    cost += 8;
+            }
+
+            return cost;
+        }
+
+        private static bool ShouldPreferPassiveDiscardTieBreak(
+            RuleAIContext context,
+            FollowCandidateViewV30 view)
+        {
+            return context.PartnerWinning || !view.CanBeatCurrentWinner;
+        }
+
         private static int ScoreCandidate(
             RuleAIContext context,
-            bool canBeat,
-            FollowWinSecurityV30 security,
-            int points,
-            int controlSpend,
-            int highControlCount,
-            bool rearOpponentThreatHigh)
+            FollowOverlayIntentV30 intent,
+            CandidateMetrics metric,
+            bool rearOpponentThreatHigh,
+            bool tempoReclaimMode)
         {
+            bool canBeat = metric.CanBeatCurrentWinner;
+            var security = metric.Security;
+            int points = metric.CandidatePoints;
+            int controlSpend = metric.ControlSpendCost;
+            int highControlCount = metric.HighControlCount;
             int score = 0;
-            if (context.PartnerWinning)
+            if (intent == FollowOverlayIntentV30.PassToMate)
             {
                 if (canBeat)
                     score -= 100;
@@ -139,6 +249,42 @@ namespace TractorGame.Core.AI.V30.Follow
 
             if (canBeat)
             {
+                if (intent == FollowOverlayIntentV30.TakeLead)
+                {
+                    int opponentsBehind = CountOpponentsBehind(context);
+                    score += security switch
+                    {
+                        FollowWinSecurityV30.Lock => 92,
+                        FollowWinSecurityV30.Stable => 68,
+                        _ => 42
+                    };
+                    score -= controlSpend * 2;
+                    score -= highControlCount * 20;
+                    score -= metric.DiscardStrengthCost / 2;
+                    score -= opponentsBehind * 16;
+                    score -= points * 10;
+
+                    if (controlSpend > 14 || metric.DiscardStrengthCost > 24)
+                        score -= 72;
+
+                    if (points == 0)
+                        score += 24;
+
+                    if (context.DecisionFrame.PlayPosition >= 3)
+                        score += 18;
+
+                    if (opponentsBehind == 0)
+                        score += 22;
+
+                    if (context.DecisionFrame.EndgameLevel != EndgameLevel.None)
+                        score += 18;
+
+                    if (tempoReclaimMode)
+                        score += 12;
+
+                    return score;
+                }
+
                 if (context.TrickScore == 0)
                 {
                     int opponentsBehind = CountOpponentsBehind(context);
@@ -183,27 +329,44 @@ namespace TractorGame.Core.AI.V30.Follow
                 score += context.TrickScore * 3;
                 score -= points;
                 score -= controlSpend;
+                if (ShouldDowngradeFragileThirdHandTake(context, metric))
+                {
+                    score -= 120;
+                    score -= points * 2;
+                }
+                return score;
+            }
+
+            if (intent == FollowOverlayIntentV30.TakeLead)
+            {
+                score -= points * 8;
+                score -= controlSpend;
+                score -= metric.DiscardStrengthCost / 2;
+                if (points == 0)
+                    score += 4;
                 return score;
             }
 
             score -= context.TrickScore * 2;
             score -= points * (context.TrickScore >= 5 ? 8 : 6);
             score -= controlSpend;
+            if (intent == FollowOverlayIntentV30.PrepareEndgame)
+                score += 8 - metric.DiscardStrengthCost / 3;
             if (points == 0)
                 score += context.TrickScore >= 5 ? 18 : 10;
             return score;
         }
 
         private static string BuildReason(
-            RuleAIContext context,
-            bool canBeat,
-            FollowWinSecurityV30 security,
-            int points,
-            int controlSpend,
+            FollowOverlayIntentV30 intent,
+            CandidateMetrics metric,
             bool rearOpponentThreatHigh)
         {
-            string securityText = security.ToString().ToLowerInvariant();
-            if (context.PartnerWinning)
+            bool canBeat = metric.CanBeatCurrentWinner;
+            int points = metric.CandidatePoints;
+            int controlSpend = metric.ControlSpendCost;
+            string securityText = metric.Security.ToString().ToLowerInvariant();
+            if (intent == FollowOverlayIntentV30.PassToMate)
             {
                 if (canBeat)
                     return $"pass_to_mate_avoid_overtake_failed_points_{points}_cost_{controlSpend}";
@@ -213,10 +376,72 @@ namespace TractorGame.Core.AI.V30.Follow
                     : $"pass_to_mate_points_{points}_cost_{controlSpend}";
             }
 
+            if (intent == FollowOverlayIntentV30.TakeLead && canBeat)
+                return $"take_lead_{securityText}_points_{points}_cost_{controlSpend}";
+
             if (canBeat)
                 return $"take_score_{securityText}_points_{points}_cost_{controlSpend}";
 
+            if (intent == FollowOverlayIntentV30.PrepareEndgame)
+                return $"prepare_endgame_preserve_control_points_{points}_cost_{controlSpend}";
+
             return $"minimize_loss_keep_points_off_table_points_{points}_cost_{controlSpend}";
+        }
+
+        private static bool ShouldDowngradeFragileThirdHandTake(
+            RuleAIContext context,
+            CandidateMetrics metric)
+        {
+            if (!metric.CanBeatCurrentWinner ||
+                metric.Security != FollowWinSecurityV30.Fragile ||
+                context.DecisionFrame.PlayPosition != 3)
+            {
+                return false;
+            }
+
+            if (CountOpponentsBehind(context) <= 0)
+                return false;
+
+            bool recutThreatHigh = context.InferenceSnapshot.HighTrumpRiskByPlayer.Any(kv =>
+                kv.Key != context.PlayerIndex &&
+                kv.Key != context.DecisionFrame.CurrentWinningPlayer &&
+                kv.Key % 2 != context.PlayerIndex % 2 &&
+                kv.Value.Level >= RiskLevel.High &&
+                kv.Value.Confidence >= 0.6);
+            if (!recutThreatHigh)
+                return false;
+
+            return context.TrickScore >= 5 || metric.CandidatePoints > 0;
+        }
+
+        private static bool ShouldActivateTempoReclaim(
+            RuleAIContext context,
+            IReadOnlyList<CandidateMetrics> metrics)
+        {
+            if (context.PartnerWinning || context.TrickScore != 0 || !IsDealerSide(context))
+                return false;
+
+            if (context.DecisionFrame.PlayPosition < 3 && context.CardsLeftMin > 8)
+                return false;
+
+            int opponentsBehind = CountOpponentsBehind(context);
+            return metrics.Any(metric =>
+                metric.CanBeatCurrentWinner &&
+                metric.CandidatePoints == 0 &&
+                metric.ControlSpendCost <= 14 &&
+                (metric.Security != FollowWinSecurityV30.Fragile || opponentsBehind == 0));
+        }
+
+        private static bool IsDealerSide(RuleAIContext context)
+        {
+            return context.Role == AIRole.Dealer || context.Role == AIRole.DealerPartner;
+        }
+
+        private static bool ShouldUsePrepareEndgameIntent(RuleAIContext context)
+        {
+            return IsDealerSide(context) &&
+                context.CardsLeftMin <= 6 &&
+                context.DecisionFrame.EndgameLevel != EndgameLevel.None;
         }
 
         private static bool HasHighRearOpponentThreat(

@@ -113,6 +113,7 @@ namespace TractorGame.Core.AI
                 return;
 
             _memory.RecordTrick(plays);
+            _ruleAIEngineV30.UpdateLeadLineState(plays);
         }
 
         /// <summary>
@@ -121,6 +122,7 @@ namespace TractorGame.Core.AI
         public void ResetMemory()
         {
             _memory.Reset();
+            _ruleAIEngineV30.ResetLeadLineState();
         }
 
         /// <summary>
@@ -800,7 +802,8 @@ namespace TractorGame.Core.AI
                         _ => 1
                     },
                     ["ControlSpendCost"] = candidate.ControlSpendCost,
-                    ["CandidatePoints"] = candidate.CandidatePoints
+                    ["CandidatePoints"] = candidate.CandidatePoints,
+                    ["DiscardStrengthCost"] = candidate.DiscardStrengthCost
                 })
                 .ToList();
 

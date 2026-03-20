@@ -48,6 +48,10 @@
             <div class="trick-uid-value" title="@GetDisplayedTrickUid()">@GetDisplayedTrickUidOrPlaceholder()</div>
             <button class="trick-uid-copy" data-testid="btn-copy-trick-uid" @onclick="CopyDisplayedTrickUid">复制</button>
         </div>
+        <div class="trick-uid-panel" data-testid="ai-line-panel">
+            <div class="trick-uid-label">AI线路</div>
+            <div class="trick-uid-value" title="@GetAiLineDescription()">@GetAiLineLabel()</div>
+        </div>
     </div>
 
     @if (_isDealingBiddingAnimation)
@@ -373,6 +377,32 @@
     private int GetCurrentPlayer()
     {
         return game?.State.CurrentPlayer ?? -1;
+    }
+
+    private string GetAiLineLabel()
+    {
+        var options = RuleAIOptionsProvider.Options;
+        if (options.UseRuleAIV30)
+            return "RuleAI V30";
+
+        if (options.UseRuleAIV21)
+            return "RuleAI V21";
+
+        return "Legacy RuleAI";
+    }
+
+    private string GetAiLineDescription()
+    {
+        var options = RuleAIOptionsProvider.Options;
+        if (options.UseRuleAIV30)
+            return options.UseRuleAIV21
+                ? "WebUI 当前使用 RuleAI V30 进行对战，V21 保持底层候选/兼容支持。"
+                : "WebUI 当前使用 RuleAI V30 进行对战。";
+
+        if (options.UseRuleAIV21)
+            return "WebUI 当前使用 RuleAI V21 进行对战。";
+
+        return "WebUI 当前使用 Legacy RuleAI 进行对战。";
     }
 
     private void UpdateUI()

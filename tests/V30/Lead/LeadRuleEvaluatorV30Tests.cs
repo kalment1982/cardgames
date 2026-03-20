@@ -22,13 +22,48 @@ namespace TractorGame.Tests.V30.Lead
         }
 
         [Fact]
-        public void Lead001_DealerThirdTrick_DoesNotTrigger()
+        public void Lead001_DealerMidgameStableSide_WithClearEdge_Triggers()
         {
             var context = new LeadContextV30
             {
                 Role = LeadRoleV30.Dealer,
                 TrickIndex = 3,
-                HasStableSideSuitRun = true
+                HasStableSideSuitRun = true,
+                HasLostSuitControl = false,
+                StableSideSuitFutureValue = 14,
+                ProbeFutureValue = 10
+            };
+
+            Assert.True(_evaluator.ShouldLead001DealerStableSideSuit(context));
+        }
+
+        [Fact]
+        public void Lead001_DealerPartnerMidgameStableSide_WithClearEdge_Triggers()
+        {
+            var context = new LeadContextV30
+            {
+                Role = LeadRoleV30.DealerPartner,
+                TrickIndex = 5,
+                HasStableSideSuitRun = true,
+                HasLostSuitControl = false,
+                StableSideSuitFutureValue = 12,
+                ProbeFutureValue = 9
+            };
+
+            Assert.True(_evaluator.ShouldLead001DealerStableSideSuit(context));
+        }
+
+        [Fact]
+        public void Lead001_StableSideWithoutEnoughEdge_DoesNotTriggerMidgame()
+        {
+            var context = new LeadContextV30
+            {
+                Role = LeadRoleV30.Dealer,
+                TrickIndex = 4,
+                HasStableSideSuitRun = true,
+                HasLostSuitControl = false,
+                StableSideSuitFutureValue = 10,
+                ProbeFutureValue = 9
             };
 
             Assert.False(_evaluator.ShouldLead001DealerStableSideSuit(context));
@@ -78,6 +113,29 @@ namespace TractorGame.Tests.V30.Lead
         }
 
         [Fact]
+        public void Lead003_StableSideOrThrowPlan_BlocksForceTrump()
+        {
+            var stableSide = new LeadContextV30
+            {
+                HasProfitableForceTrump = true,
+                HasStableSideSuitRun = true,
+                HasLostSuitControl = false,
+                StableSideSuitFutureValue = 12,
+                ForceTrumpFutureValue = 13
+            };
+            var throwPlan = new LeadContextV30
+            {
+                HasProfitableForceTrump = true,
+                HasFutureThrowPlan = true,
+                FutureThrowExpectedScore = 14,
+                IsProtectBottomMode = false
+            };
+
+            Assert.False(_evaluator.ShouldLead003ForceTrump(stableSide));
+            Assert.False(_evaluator.ShouldLead003ForceTrump(throwPlan));
+        }
+
+        [Fact]
         public void Lead007_DualConditionRequired_BlindHandoffBlocked()
         {
             var blind = new LeadContextV30
@@ -114,6 +172,28 @@ namespace TractorGame.Tests.V30.Lead
 
             Assert.False(_evaluator.ShouldLead007HandOff(futureThrow));
             Assert.False(_evaluator.ShouldLead007HandOff(buildVoid));
+        }
+
+        [Fact]
+        public void Lead007_DealerSideEarlyOrPositiveProbe_BlocksHandoff()
+        {
+            var earlyDealer = new LeadContextV30
+            {
+                Role = LeadRoleV30.Dealer,
+                TrickIndex = 2,
+                MateHasPositiveTakeoverEvidence = true,
+                ProbeFutureValue = -1
+            };
+            var positiveProbe = new LeadContextV30
+            {
+                Role = LeadRoleV30.Dealer,
+                TrickIndex = 5,
+                MateHasPositiveTakeoverEvidence = true,
+                ProbeFutureValue = 12
+            };
+
+            Assert.False(_evaluator.ShouldLead007HandOff(earlyDealer));
+            Assert.False(_evaluator.ShouldLead007HandOff(positiveProbe));
         }
 
         [Fact]

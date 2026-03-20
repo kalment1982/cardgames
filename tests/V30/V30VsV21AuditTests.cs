@@ -22,6 +22,17 @@ namespace TractorGame.Tests.V30
         [Fact]
         public void V30_Vs_V21_Audit_20Games()
         {
+            RunAudit(targetGames: 20, labelPrefix: "mixed20");
+        }
+
+        [Fact]
+        public void V30_Vs_V21_Audit_100Games()
+        {
+            RunAudit(targetGames: 100, labelPrefix: "mixed100");
+        }
+
+        private void RunAudit(int targetGames, string labelPrefix)
+        {
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             var artifactRoot = TestPathHelper.ResolveFromRepoRoot("artifacts", "ruleai_v30_vs_v21_eval", timestamp);
             Directory.CreateDirectory(artifactRoot);
@@ -36,12 +47,13 @@ namespace TractorGame.Tests.V30
 
             var attemptSummaries = new List<MixedGameAuditSummary>();
             var finishedSummaries = new List<MixedGameAuditSummary>();
-            for (var i = 0; i < 40 && finishedSummaries.Count < 20; i++)
+            int maxAttempts = targetGames * 2;
+            for (var i = 0; i < maxAttempts && finishedSummaries.Count < targetGames; i++)
             {
                 bool v30OnEvenSeats = i % 2 == 0;
                 var summary = PlaySingleGame(
                     seed: 23000 + i,
-                    label: $"mixed20_g{i:D2}",
+                    label: $"{labelPrefix}_g{i:D3}",
                     v30OnEvenSeats: v30OnEvenSeats,
                     logger: logger);
                 attemptSummaries.Add(summary);
@@ -54,13 +66,13 @@ namespace TractorGame.Tests.V30
                 .ThenBy(entry => entry.Seq)
                 .ToList();
 
-            var summaryPath = Path.Combine(artifactRoot, "mixed20_summary.json");
-            var perTrickPath = Path.Combine(artifactRoot, "mixed20_per_trick.md");
+            var summaryPath = Path.Combine(artifactRoot, $"{labelPrefix}_summary.json");
+            var perTrickPath = Path.Combine(artifactRoot, $"{labelPrefix}_per_trick.md");
 
             File.WriteAllText(summaryPath, BuildSummaryJson(entries, finishedSummaries, attemptSummaries));
             File.WriteAllText(perTrickPath, BuildPerTrickMarkdown(entries, finishedSummaries));
 
-            Assert.Equal(20, finishedSummaries.Count);
+            Assert.Equal(targetGames, finishedSummaries.Count);
         }
 
         private static MixedGameAuditSummary PlaySingleGame(int seed, string label, bool v30OnEvenSeats, IGameLogger logger)

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using TractorGame.Core.AI;
 using TractorGame.Core.AI.V21;
 using TractorGame.Core.AI.V30.Follow;
 using TractorGame.Core.Models;
@@ -257,6 +258,62 @@ namespace TractorGame.Tests.V30.Follow
         }
 
         [Fact]
+        public void BuildAndRank_MinimizeLossSameTier_PrefersLowerStrengthDiscard()
+        {
+            var config = FollowOverlayTestHelper.CreateConfig();
+            var context = FollowOverlayTestHelper.BuildFollowContext(
+                config,
+                new List<Card>
+                {
+                    new Card(Suit.Heart, Rank.Ace),
+                    new Card(Suit.Heart, Rank.Four)
+                },
+                new List<Card> { new Card(Suit.Heart, Rank.Ace) },
+                new List<Card> { new Card(Suit.Heart, Rank.Ace) },
+                partnerWinning: false,
+                trickScore: 0);
+
+            var overlay = new FollowCandidateOverlayV30();
+            var ranked = overlay.BuildAndRank(context, new[]
+            {
+                new List<Card> { new Card(Suit.Heart, Rank.Ace) },
+                new List<Card> { new Card(Suit.Heart, Rank.Four) }
+            });
+
+            Assert.Equal(Rank.Four, ranked[0].Cards[0].Rank);
+            Assert.True(ranked[0].DiscardStrengthCost < ranked[1].DiscardStrengthCost);
+        }
+
+        [Fact]
+        public void BuildAndRank_PassToMateSameTier_PrefersLowerStrengthDiscard()
+        {
+            var config = FollowOverlayTestHelper.CreateConfig();
+            var context = FollowOverlayTestHelper.BuildFollowContext(
+                config,
+                new List<Card>
+                {
+                    new Card(Suit.Club, Rank.King),
+                    new Card(Suit.Club, Rank.Six)
+                },
+                new List<Card> { new Card(Suit.Club, Rank.Ace) },
+                new List<Card> { new Card(Suit.Club, Rank.Ace) },
+                partnerWinning: true,
+                trickScore: 0,
+                playPosition: 3,
+                currentWinningPlayer: 2);
+
+            var overlay = new FollowCandidateOverlayV30();
+            var ranked = overlay.BuildAndRank(context, new[]
+            {
+                new List<Card> { new Card(Suit.Club, Rank.King) },
+                new List<Card> { new Card(Suit.Club, Rank.Six) }
+            });
+
+            Assert.Equal(Rank.Six, ranked[0].Cards[0].Rank);
+            Assert.True(ranked[0].DiscardStrengthCost < ranked[1].DiscardStrengthCost);
+        }
+
+        [Fact]
         public void BuildAndRank_AssignsSecurityLevels()
         {
             var config = FollowOverlayTestHelper.CreateConfig();
@@ -334,6 +391,107 @@ namespace TractorGame.Tests.V30.Follow
             });
 
             Assert.Equal(FollowOverlayIntentV30.MinimizeLoss, intent);
+        }
+
+        [Fact]
+        public void BuildAndRank_DealerSideZeroPointTempoWindow_PrefersCheapLeadReclaim()
+        {
+            var config = new GameConfig
+            {
+                TrumpSuit = Suit.Spade,
+                LevelRank = Rank.Two
+            };
+            var context = FollowOverlayTestHelper.BuildFollowContext(
+                config,
+                new List<Card>
+                {
+                    new Card(Suit.Heart, Rank.King),
+                    new Card(Suit.Spade, Rank.Nine)
+                },
+                new List<Card> { new Card(Suit.Heart, Rank.Queen) },
+                new List<Card> { new Card(Suit.Heart, Rank.Queen) },
+                partnerWinning: false,
+                trickScore: 0,
+                playerIndex: 0,
+                dealerIndex: 0,
+                playPosition: 4,
+                currentWinningPlayer: 1);
+            context = new RuleAIContext
+            {
+                Phase = context.Phase,
+                Role = AIRole.Dealer,
+                Difficulty = context.Difficulty,
+                PlayerIndex = context.PlayerIndex,
+                DealerIndex = context.DealerIndex,
+                MyHand = context.MyHand,
+                LegalActions = context.LegalActions,
+                LeadCards = context.LeadCards,
+                CurrentWinningCards = context.CurrentWinningCards,
+                VisibleBottomCards = context.VisibleBottomCards,
+                GameConfig = context.GameConfig,
+                RuleProfile = context.RuleProfile,
+                DifficultyProfile = context.DifficultyProfile,
+                StyleProfile = context.StyleProfile,
+                HandProfile = context.HandProfile,
+                MemorySnapshot = context.MemorySnapshot,
+                InferenceSnapshot = context.InferenceSnapshot,
+                DecisionFrame = context.DecisionFrame,
+                BidRoundIndex = context.BidRoundIndex,
+                CurrentBidPriority = context.CurrentBidPriority,
+                CurrentBidPlayer = context.CurrentBidPlayer
+            };
+
+            var overlay = new FollowCandidateOverlayV30();
+            var ranked = overlay.BuildAndRank(context, new[]
+            {
+                new List<Card> { new Card(Suit.Heart, Rank.King) },
+                new List<Card> { new Card(Suit.Spade, Rank.Nine) }
+            });
+            var intent = overlay.ResolveIntent(context, ranked);
+
+            Assert.Equal(Rank.Nine, ranked[0].Cards[0].Rank);
+            Assert.True(ranked[0].CanBeatCurrentWinner);
+            Assert.Equal(FollowOverlayIntentV30.TakeLead, intent);
+            Assert.StartsWith("take_lead_", ranked[0].Reason);
+        }
+
+        [Fact]
+        public void BuildAndRank_ThirdHandFragileTakeScore_WithRearOpponentThreat_PrefersHolding()
+        {
+            var config = FollowOverlayTestHelper.CreateConfig();
+            var context = FollowOverlayTestHelper.BuildFollowContext(
+                config,
+                new List<Card>
+                {
+                    new Card(Suit.Club, Rank.Queen),
+                    new Card(Suit.Club, Rank.Three)
+                },
+                new List<Card> { new Card(Suit.Club, Rank.Nine) },
+                new List<Card> { new Card(Suit.Club, Rank.Jack) },
+                partnerWinning: false,
+                trickScore: 10,
+                playerIndex: 0,
+                dealerIndex: 2,
+                playPosition: 3,
+                currentWinningPlayer: 1,
+                inferenceSnapshot: new InferenceSnapshot
+                {
+                    HighTrumpRiskByPlayer = new Dictionary<int, RiskEstimate>
+                    {
+                        [1] = new RiskEstimate { Level = RiskLevel.Low, Confidence = 0.8 },
+                        [3] = new RiskEstimate { Level = RiskLevel.High, Confidence = 0.8 }
+                    }
+                });
+
+            var overlay = new FollowCandidateOverlayV30();
+            var ranked = overlay.BuildAndRank(context, new[]
+            {
+                new List<Card> { new Card(Suit.Club, Rank.Queen) },
+                new List<Card> { new Card(Suit.Club, Rank.Three) }
+            });
+
+            Assert.Equal(Rank.Three, ranked[0].Cards[0].Rank);
+            Assert.False(ranked[0].CanBeatCurrentWinner);
         }
     }
 }

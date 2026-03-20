@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using TractorGame.Core.AI.V21;
 
 namespace TractorGame.Core.AI.V30.Lead
 {
@@ -70,6 +71,9 @@ namespace TractorGame.Core.AI.V30.Lead
 
         public bool HasProbePlan { get; init; } = true;
         public int ProbeFutureValue { get; init; }
+
+        public LeadLineStateV30? LineState { get; init; }
+        public EndgameLevel EndgameLevel { get; init; } = EndgameLevel.None;
     }
 
     public sealed class LeadCandidateV30

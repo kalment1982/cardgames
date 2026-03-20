@@ -5,6 +5,7 @@ using TractorGame.Core.AI.V21;
 using TractorGame.Core.AI.V30.Follow;
 using TractorGame.Core.AI.V30.Lead;
 using TractorGame.Core.Models;
+using TractorGame.Core.Rules;
 
 namespace TractorGame.Core.AI.V30
 {
@@ -56,6 +57,8 @@ namespace TractorGame.Core.AI.V30
         private readonly LeadPolicyV30 _leadPolicy;
         private readonly FollowPolicyV30 _followPolicy;
         private readonly GameConfig _config;
+        private readonly LeadLineStateV30 _leadLineState = new();
+        private int _myPlayerIndex = -1;
 
         public RuleAIEngineV30(
             GameConfig config,
@@ -74,6 +77,7 @@ namespace TractorGame.Core.AI.V30
             PhaseDecision v21Decision,
             AIDecisionLogContext? logContext = null)
         {
+            _myPlayerIndex = context.PlayerIndex;
             var scoredActions = v21Decision.ScoredActions ?? new List<ScoredAction>();
             var entries = BuildLeadEntries(scoredActions, v21Decision);
             if (entries.Count == 0 && v21Decision.SelectedCards.Count > 0)
@@ -101,6 +105,8 @@ namespace TractorGame.Core.AI.V30
             string selectedCandidateId = selection.SelectedCandidateId;
             string selectedReason = selection.SelectedReason;
             var triggeredRules = selection.TriggeredRules.ToList();
+
+            UpdateLeadLineAfterDecision(selectedCandidateId, leadContext);
 
             return new LeadOverlayDecisionV30
             {
@@ -158,6 +164,72 @@ namespace TractorGame.Core.AI.V30
         public LeadDecisionV30 DecideLeadStandalone(LeadContextV30 context)
         {
             return _leadPolicy.Decide(context);
+        }
+
+        public void UpdateLeadLineState(List<TrickPlay> plays)
+        {
+            if (plays == null || plays.Count == 0 || _myPlayerIndex < 0)
+                return;
+
+            bool iMyLead = plays[0].PlayerIndex == _myPlayerIndex;
+            if (!iMyLead)
+                return;
+
+            var judge = new TrickJudge(_config);
+            int winnerIndex = judge.DetermineWinner(plays);
+            bool won = winnerIndex == _myPlayerIndex;
+
+            if (won)
+            {
+                _leadLineState.ConsecutiveWins++;
+                _leadLineState.LastTrickWon = true;
+                _leadLineState.ConsecutiveLeads++;
+                int trickScore = plays.SelectMany(p => p.Cards).Sum(c => c.Score);
+                _leadLineState.AccumulatedScore += trickScore;
+            }
+            else
+            {
+                _leadLineState.Reset();
+            }
+        }
+
+        public void ResetLeadLineState()
+        {
+            _leadLineState.Reset();
+        }
+
+        private void UpdateLeadLineAfterDecision(string candidateId, LeadContextV30 leadContext)
+        {
+            _leadLineState.ActiveCandidateId = candidateId;
+
+            if (candidateId.StartsWith("lead001.", StringComparison.Ordinal) ||
+                candidateId.StartsWith("lead006.", StringComparison.Ordinal))
+            {
+                _leadLineState.ActiveLine = LeadLineKind.StableSideSuitRun;
+                _leadLineState.ActiveSuit = candidateId;
+            }
+            else if (candidateId.StartsWith("lead002.", StringComparison.Ordinal) ||
+                     candidateId.StartsWith("lead005.", StringComparison.Ordinal))
+            {
+                _leadLineState.ActiveLine = LeadLineKind.ScorePush;
+                _leadLineState.ActiveSuit = null;
+            }
+            else if (candidateId.StartsWith("lead003.", StringComparison.Ordinal))
+            {
+                _leadLineState.ActiveLine = LeadLineKind.TrumpSqueeze;
+                _leadLineState.ActiveSuit = null;
+            }
+            else if (candidateId.StartsWith("lead007.", StringComparison.Ordinal))
+            {
+                _leadLineState.ActiveLine = LeadLineKind.HandOffToMate;
+                _leadLineState.ActiveSuit = null;
+            }
+            else if (candidateId.StartsWith("lead004.", StringComparison.Ordinal))
+            {
+                // ProbeWeakSuit: only reset if not already in a run
+                if (!_leadLineState.IsInRun)
+                    _leadLineState.Reset();
+            }
         }
 
         private LeadContextV30 InferLeadContext(
@@ -227,7 +299,10 @@ namespace TractorGame.Core.AI.V30
                 VoidPlanFutureValue = ScoreToFutureValue(voidBuild?.Score ?? 0),
 
                 HasProbePlan = true,
-                ProbeFutureValue = ScoreToFutureValue(entries.FirstOrDefault()?.Score ?? 0)
+                ProbeFutureValue = ScoreToFutureValue(entries.FirstOrDefault()?.Score ?? 0),
+
+                LineState = _leadLineState,
+                EndgameLevel = context.DecisionFrame.EndgameLevel
             };
         }
 
@@ -243,11 +318,17 @@ namespace TractorGame.Core.AI.V30
 
             foreach (var candidate in orderedCandidates)
             {
+                if (ShouldSuppressForceTrumpConcrete(context, candidate, entries))
+                {
+                    firstRejectedCandidate ??= candidate;
+                    continue;
+                }
+
                 var candidateEntry = SelectConcreteLeadEntry(context, v21Decision, entries, candidate);
                 if (candidateEntry == null)
                     continue;
 
-                if (PassesConcreteLeadGuard(candidate, candidateEntry, bestOverallEntry))
+                if (PassesConcreteLeadGuard(context, candidate, candidateEntry, bestOverallEntry))
                 {
                     return LeadSelectionResult.FromSemantic(candidate, candidateEntry);
                 }
@@ -284,6 +365,24 @@ namespace TractorGame.Core.AI.V30
             return LeadSelectionResult.CreateGuardFallback(entries.FirstOrDefault(), null);
         }
 
+        private bool ShouldSuppressForceTrumpConcrete(
+            RuleAIContext context,
+            LeadCandidateV30 candidate,
+            IReadOnlyList<LeadActionEntry> entries)
+        {
+            if (!string.Equals(candidate.CandidateId, "lead003.force_trump", StringComparison.Ordinal))
+                return false;
+
+            bool protectBottomOrEndgame =
+                context.DecisionFrame.BottomRiskPressure >= RiskLevel.Medium ||
+                context.DecisionFrame.DealerRetentionRisk >= RiskLevel.Medium ||
+                context.CardsLeftMin <= 6;
+            if (protectBottomOrEndgame)
+                return false;
+
+            return HasDealerSideCheapNonTrumpProbe(context, entries);
+        }
+
         private LeadActionEntry? SelectConcreteLeadEntry(
             RuleAIContext context,
             PhaseDecision v21Decision,
@@ -308,14 +407,7 @@ namespace TractorGame.Core.AI.V30
 
             if (selected != null)
                 return selected;
-
-            if (v21Decision.SelectedCards.Count > 0)
-            {
-                string selectedKey = BuildCandidateKey(v21Decision.SelectedCards);
-                selected = entries.FirstOrDefault(entry => string.Equals(entry.Key, selectedKey, StringComparison.Ordinal));
-            }
-
-            return selected ?? entries.FirstOrDefault();
+            return null;
         }
 
         private static IReadOnlyList<LeadCandidateV30> OrderSemanticCandidates(IReadOnlyList<LeadCandidateV30> candidates)
@@ -337,7 +429,8 @@ namespace TractorGame.Core.AI.V30
                 .FirstOrDefault();
         }
 
-        private static bool PassesConcreteLeadGuard(
+        private bool PassesConcreteLeadGuard(
+            RuleAIContext context,
             LeadCandidateV30 candidate,
             LeadActionEntry candidateEntry,
             LeadActionEntry? bestOverallEntry)
@@ -351,13 +444,62 @@ namespace TractorGame.Core.AI.V30
             if (bestOverallEntry.Score >= 0 && candidateEntry.Score < 0)
                 return false;
 
+            if (ShouldBypassConcreteGuard(context, candidate, candidateEntry, bestOverallEntry))
+                return true;
+
             double scoreGap = bestOverallEntry.Score - candidateEntry.Score;
             if (scoreGap <= 0)
                 return true;
 
+            if (context.Role == AIRole.Opponent &&
+                (string.Equals(candidate.CandidateId, "lead003.force_trump", StringComparison.Ordinal) ||
+                 string.Equals(candidate.CandidateId, "lead004.low_value_probe", StringComparison.Ordinal) ||
+                 string.Equals(candidate.CandidateId, "lead007.handoff_to_mate", StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
             return scoreGap <= GetConcreteScoreGapAllowance(candidate.CandidateId);
         }
 
+        private bool ShouldBypassConcreteGuard(
+            RuleAIContext context,
+            LeadCandidateV30 candidate,
+            LeadActionEntry candidateEntry,
+            LeadActionEntry bestOverallEntry)
+        {
+            if (string.Equals(candidate.CandidateId, "lead003.force_trump", StringComparison.Ordinal))
+            {
+                bool candidateIsZeroPointTrump = candidateEntry.Cards.Count > 0 &&
+                    candidateEntry.Cards.Sum(card => card.Score) == 0;
+                bool bestOverallIsScoreTrump = bestOverallEntry.Cards.Count > 0 &&
+                    bestOverallEntry.Cards.All(_config.IsTrump) &&
+                    bestOverallEntry.Cards.Sum(card => card.Score) > 0;
+
+                return candidateIsZeroPointTrump && bestOverallIsScoreTrump;
+            }
+
+            if (string.Equals(candidate.CandidateId, "lead004.low_value_probe", StringComparison.Ordinal))
+            {
+                double probeGap = bestOverallEntry.Score - candidateEntry.Score;
+                if (context.DecisionFrame.EndgameLevel != EndgameLevel.None && probeGap > 0.5)
+                    return false;
+
+                int candidateCategory = GetProbeCategory(candidateEntry);
+                int bestCategory = GetProbeCategory(bestOverallEntry);
+                if (candidateCategory < bestCategory)
+                    return true;
+
+                if (candidateCategory == bestCategory)
+                {
+                    double candidateRisk = GetProbeRiskScore(candidateEntry);
+                    double bestRisk = GetProbeRiskScore(bestOverallEntry);
+                    return candidateRisk + 0.25 < bestRisk;
+                }
+            }
+
+            return false;
+        }
         private static double GetConcreteScoreGapAllowance(string candidateId)
         {
             return candidateId switch
@@ -367,7 +509,7 @@ namespace TractorGame.Core.AI.V30
                 "lead001.dealer_stable_side" => 2.0,
                 "lead002.score_side_cash" => 1.0,
                 "lead006.team_side_suit" => 2.0,
-                "lead003.force_trump" => 1.5,
+                "lead003.force_trump" => 0.0,
                 "lead007.handoff_to_mate" => 2.0,
                 "lead008.three_pair.high_control" => 2.0,
                 "lead008.three_pair.low_pair_consume" => 2.0,
@@ -467,6 +609,7 @@ namespace TractorGame.Core.AI.V30
         {
             return entries
                 .Where(entry => IsStableSideSuitEntry(context, entry.Cards))
+                .Where(entry => IsDealerEarlyStableSideEntry(context, entry.Cards))
                 .OrderByDescending(entry => entry.Score)
                 .ThenByDescending(entry => GetStableSideSuitStrength(context, entry.Cards))
                 .FirstOrDefault();
@@ -506,6 +649,41 @@ namespace TractorGame.Core.AI.V30
             return strength > 0;
         }
 
+        private bool IsDealerEarlyStableSideEntry(RuleAIContext context, IReadOnlyList<Card> cards)
+        {
+            if (context.Role != AIRole.Dealer || context.DecisionFrame.TrickIndex > 2)
+                return true;
+
+            int suitLength = context.MyHand.Count(card => !_config.IsTrump(card) && card.Suit == cards[0].Suit);
+            int totalPoints = cards.Sum(card => card.Score);
+            int topValue = cards.Max(card => RuleAIUtility.GetCardValue(card, _config));
+            var pattern = new CardPattern(cards.ToList(), _config);
+            var remainingSameSuit = RuleAIUtility.RemoveCards(context.MyHand, cards.ToList())
+                .Where(card => !_config.IsTrump(card) && card.Suit == cards[0].Suit)
+                .ToList();
+
+            if (pattern.IsTractor(cards.ToList()))
+                return topValue >= 111 || totalPoints >= 10;
+
+            if (IsExactPair(cards))
+            {
+                bool hasStrongSupport = remainingSameSuit.Any(card => RuleAIUtility.GetCardValue(card, _config) >= 113) ||
+                    remainingSameSuit.Count >= 3;
+                return topValue >= 114 ||
+                    (totalPoints >= 20 && hasStrongSupport);
+            }
+
+            if (cards.Count == 1)
+            {
+                return topValue >= 114 &&
+                    (remainingSameSuit.Any(card => RuleAIUtility.GetCardValue(card, _config) >= 113) ||
+                     remainingSameSuit.Count >= 2 ||
+                     totalPoints >= 10);
+            }
+
+            return false;
+        }
+
         private bool IsScoreSideLeadEntry(RuleAIContext context, IReadOnlyList<Card> cards)
         {
             if (!IsStableSideSuitEntry(context, cards))
@@ -527,15 +705,7 @@ namespace TractorGame.Core.AI.V30
             if (IsExactPair(cards))
                 return topValue >= 112;
 
-            if (cards.Count != 1 || topValue < 114)
-                return false;
-
-            var remainingSameSuit = RuleAIUtility.RemoveCards(context.MyHand, cards.ToList())
-                .Where(card => !_config.IsTrump(card) && card.Suit == cards[0].Suit)
-                .ToList();
-
-            return remainingSameSuit.Any(card => RuleAIUtility.GetCardValue(card, _config) >= 113) ||
-                remainingSameSuit.Count >= 2;
+            return cards.Count == 1 && topValue >= 114;
         }
 
         private int GetScoreSideLeadStrength(RuleAIContext context, IReadOnlyList<Card> cards)
@@ -562,7 +732,15 @@ namespace TractorGame.Core.AI.V30
             if (IsExactPair(cards))
                 return topValue >= 113;
 
-            return cards.Count == 1 && topValue >= 114;
+            if (cards.Count != 1 || topValue < 114)
+                return false;
+
+            var remainingSameSuit = RuleAIUtility.RemoveCards(context.MyHand, cards.ToList())
+                .Where(card => !_config.IsTrump(card) && card.Suit == cards[0].Suit)
+                .ToList();
+
+            return remainingSameSuit.Any(card => RuleAIUtility.GetCardValue(card, _config) >= 113) ||
+                remainingSameSuit.Count >= 2;
         }
 
         private int GetStableSideSuitStrength(RuleAIContext context, IReadOnlyList<Card> cards)
@@ -618,7 +796,11 @@ namespace TractorGame.Core.AI.V30
 
             bool v21ExplicitForceTrump = v21Decision.Intent?.PrimaryIntent == DecisionIntentKind.ForceTrump;
             bool trumpHeavy = context.HandProfile.TrumpCount >= Math.Max(5, Math.Max(1, context.HandCount / 2));
-            if (!v21ExplicitForceTrump && !trumpHeavy)
+            bool strongTrumpCore =
+                context.HandProfile.HighTrumpCount >= 2 ||
+                context.HandProfile.JokerCount >= 1 ||
+                context.HandProfile.TrumpPairCount >= 1;
+            if (!v21ExplicitForceTrump && (!trumpHeavy || !strongTrumpCore))
                 return null;
 
             if (SelectBestScoreSideLeadEntry(context, entries) != null)
@@ -629,18 +811,41 @@ namespace TractorGame.Core.AI.V30
                 context.DecisionFrame.DealerRetentionRisk >= RiskLevel.Medium ||
                 context.CardsLeftMin <= 6;
 
+            bool dealerSideHasCheapSideProbe = HasDealerSideCheapNonTrumpProbe(context, entries);
+            if (!protectBottomOrEndgame && dealerSideHasCheapSideProbe)
+                return null;
+
+            if (context.Role == AIRole.Dealer &&
+                context.DecisionFrame.TrickIndex <= 2 &&
+                !protectBottomOrEndgame &&
+                !v21ExplicitForceTrump &&
+                context.HandProfile.HighTrumpCount < 2 &&
+                context.HandProfile.JokerCount == 0)
+            {
+                return null;
+            }
+
             trumpEntries = trumpEntries
                 .Where(entry => protectBottomOrEndgame || entry.Cards.Sum(card => card.Score) == 0)
+                .Where(entry => protectBottomOrEndgame || RuleAIUtility.CountHighControlCards(_config, entry.Cards) == 0)
                 .ToList();
             if (trumpEntries.Count == 0)
                 return null;
 
-            return trumpEntries
+            var bestTrumpEntry = trumpEntries
                 .OrderBy(entry => entry.Features.GetValueOrDefault("HighControlLossCost") + entry.Features.GetValueOrDefault("TrumpConsumptionCost"))
                 .ThenBy(entry => entry.Cards.Sum(card => card.Score))
                 .ThenBy(entry => entry.Cards.Max(card => RuleAIUtility.GetCardValue(card, _config)))
                 .ThenByDescending(entry => entry.Score)
                 .FirstOrDefault();
+
+            if (bestTrumpEntry == null)
+                return null;
+
+            if (!protectBottomOrEndgame && bestTrumpEntry.Score < 0)
+                return null;
+
+            return bestTrumpEntry;
         }
 
         private LeadActionEntry? SelectHandoffEntry(
@@ -787,13 +992,229 @@ namespace TractorGame.Core.AI.V30
             RuleAIContext context,
             IReadOnlyList<LeadActionEntry> entries)
         {
-            return entries
-                .OrderBy(entry => entry.Features.GetValueOrDefault("StructureBreakCost"))
+            var probeEntries = entries.ToList();
+            bool dealerSide = context.Role == AIRole.Dealer || context.Role == AIRole.DealerPartner;
+            bool hasCheapZeroNonTrumpProbe = probeEntries.Any(IsSingleNonTrumpZeroProbe);
+
+            if (dealerSide && hasCheapZeroNonTrumpProbe)
+            {
+                probeEntries = probeEntries
+                    .Where(entry => !ShouldFilterDealerSidePointProbe(context, entry))
+                    .ToList();
+            }
+
+            if (dealerSide &&
+                hasCheapZeroNonTrumpProbe &&
+                context.DecisionFrame.ScorePressure != ScorePressureLevel.Critical &&
+                context.DecisionFrame.EndgameLevel == EndgameLevel.None)
+            {
+                probeEntries = probeEntries
+                    .Where(entry => !ShouldFilterDealerSideTrumpProbe(entry))
+                    .ToList();
+            }
+
+            if ((context.Role == AIRole.Dealer || context.Role == AIRole.DealerPartner) &&
+                context.DecisionFrame.TrickIndex <= 4 &&
+                probeEntries.Any(entry => IsSingleNonTrumpProbe(entry)))
+            {
+                double bestSingleProbeScore = probeEntries
+                    .Where(entry => IsSingleNonTrumpProbe(entry))
+                    .Max(entry => entry.Score);
+                probeEntries = probeEntries
+                    .Where(entry => !IsWeakMultiCardDealerProbe(entry) || entry.Score >= bestSingleProbeScore + 2.0)
+                    .ToList();
+            }
+
+            if (probeEntries.Any(entry => entry.Score >= 0))
+            {
+                probeEntries = probeEntries
+                    .Where(entry => entry.Score >= 0)
+                    .ToList();
+            }
+
+            var selected = probeEntries
+                .OrderBy(entry => GetProbeCategory(entry))
+                .ThenBy(entry => entry.Features.GetValueOrDefault("StructureBreakCost"))
                 .ThenBy(entry => entry.Features.GetValueOrDefault("HighControlLossCost"))
                 .ThenBy(entry => entry.Cards.Sum(card => card.Score))
                 .ThenBy(entry => entry.Cards.Count == 1 ? RuleAIUtility.GetCardValue(entry.Cards[0], _config) : int.MaxValue)
                 .ThenByDescending(entry => entry.Score)
                 .FirstOrDefault();
+
+            if (selected != null &&
+                selected.Cards.Count == 1 &&
+                !context.GameConfig.IsTrump(selected.Cards[0]))
+            {
+                var pairUpgrade = probeEntries
+                    .Where(entry => IsExactPair(entry.Cards))
+                    .Where(entry => entry.Cards[0].Suit == selected.Cards[0].Suit &&
+                                    entry.Cards[0].Rank == selected.Cards[0].Rank)
+                    .OrderByDescending(entry => entry.Score)
+                    .FirstOrDefault();
+                if (pairUpgrade != null && pairUpgrade.Score >= selected.Score + 3.0)
+                    return pairUpgrade;
+            }
+
+            var assertiveProbeUpgrade = selected == null
+                ? null
+                : SelectAssertiveProbeUpgrade(context, probeEntries, selected);
+            if (assertiveProbeUpgrade != null)
+                return assertiveProbeUpgrade;
+
+            return selected;
+        }
+
+        private bool HasDealerSideCheapNonTrumpProbe(
+            RuleAIContext context,
+            IReadOnlyList<LeadActionEntry> entries)
+        {
+            return (context.Role == AIRole.Dealer || context.Role == AIRole.DealerPartner) &&
+                entries.Any(entry =>
+                    entry.Cards.Count > 0 &&
+                    !entry.Cards.All(_config.IsTrump) &&
+                    entry.Cards.Sum(card => card.Score) == 0 &&
+                    entry.Score >= 0);
+        }
+
+        private bool IsSingleNonTrumpProbe(LeadActionEntry entry)
+        {
+            return entry.Cards.Count == 1 &&
+                !entry.Cards.All(_config.IsTrump);
+        }
+
+        private bool IsSingleNonTrumpZeroProbe(LeadActionEntry entry)
+        {
+            return IsSingleNonTrumpProbe(entry) &&
+                entry.Cards.Sum(card => card.Score) == 0;
+        }
+
+        private bool ShouldFilterDealerSidePointProbe(RuleAIContext context, LeadActionEntry entry)
+        {
+            if (entry.Cards.Count == 0 || entry.Cards.All(_config.IsTrump))
+                return false;
+
+            if (entry.Cards.Sum(card => card.Score) == 0)
+                return false;
+
+            int topValue = entry.Cards.Max(card => RuleAIUtility.GetCardValue(card, _config));
+            return topValue < 113 && !IsScoreSideLeadEntry(context, entry.Cards);
+        }
+
+        private bool ShouldFilterDealerSideTrumpProbe(LeadActionEntry entry)
+        {
+            if (entry.Cards.Count == 0 || !entry.Cards.All(_config.IsTrump))
+                return false;
+
+            return entry.Cards.Sum(card => card.Score) > 0 ||
+                RuleAIUtility.CountHighControlCards(_config, entry.Cards) > 0;
+        }
+
+        private bool IsWeakMultiCardDealerProbe(LeadActionEntry entry)
+        {
+            if (entry.Cards.Count <= 1 || entry.Cards.All(_config.IsTrump))
+                return false;
+
+            if (entry.Cards.Sum(card => card.Score) > 0)
+                return false;
+
+            int topValue = entry.Cards.Max(card => RuleAIUtility.GetCardValue(card, _config));
+            return topValue < 113;
+        }
+
+        private LeadActionEntry? SelectAssertiveProbeUpgrade(
+            RuleAIContext context,
+            IReadOnlyList<LeadActionEntry> probeEntries,
+            LeadActionEntry selected)
+        {
+            if (!ShouldUseAssertiveProbeUpgrade(context))
+                return null;
+
+            var sameShapeEntries = probeEntries
+                .Where(entry => !string.Equals(entry.Key, selected.Key, StringComparison.Ordinal))
+                .Where(entry => entry.Cards.Count == selected.Cards.Count)
+                .Where(entry => entry.Features.GetValueOrDefault("StructureBreakCost") <=
+                                selected.Features.GetValueOrDefault("StructureBreakCost") + 2.0)
+                .Where(entry => entry.Features.GetValueOrDefault("HighControlLossCost") <=
+                                selected.Features.GetValueOrDefault("HighControlLossCost") + 2.0)
+                .Where(entry =>
+                    entry.Cards.Count > selected.Cards.Count ||
+                    entry.Cards.Max(card => RuleAIUtility.GetCardValue(card, _config)) >=
+                    selected.Cards.Max(card => RuleAIUtility.GetCardValue(card, _config)) + 2)
+                .ToList();
+            if (sameShapeEntries.Count == 0)
+                return null;
+
+            var nonTrumpUpgrade = sameShapeEntries
+                .Where(entry => entry.Cards.Count > 0 && !entry.Cards.All(_config.IsTrump))
+                .OrderByDescending(entry => entry.Score)
+                .ThenBy(entry => GetProbeCategory(entry))
+                .ThenBy(entry => entry.Features.GetValueOrDefault("StructureBreakCost"))
+                .ThenBy(entry => entry.Features.GetValueOrDefault("HighControlLossCost"))
+                .FirstOrDefault();
+            if (nonTrumpUpgrade != null && nonTrumpUpgrade.Score >= selected.Score + 1.5)
+                return nonTrumpUpgrade;
+
+            if (context.DecisionFrame.ScorePressure != ScorePressureLevel.Critical)
+                return null;
+
+            var lowTrumpUpgrade = sameShapeEntries
+                .Where(entry => entry.Cards.Count == 1)
+                .Where(entry => entry.Cards.All(_config.IsTrump))
+                .Where(entry => RuleAIUtility.CountHighControlCards(_config, entry.Cards) == 0)
+                .OrderByDescending(entry => entry.Score)
+                .ThenBy(entry => GetProbeCategory(entry))
+                .ThenBy(entry => entry.Features.GetValueOrDefault("StructureBreakCost"))
+                .ThenBy(entry => entry.Features.GetValueOrDefault("HighControlLossCost"))
+                .FirstOrDefault();
+            if (lowTrumpUpgrade != null && lowTrumpUpgrade.Score >= selected.Score + 2.0)
+                return lowTrumpUpgrade;
+
+            return null;
+        }
+
+        private static bool ShouldUseAssertiveProbeUpgrade(RuleAIContext context)
+        {
+            if (context.Role != AIRole.Dealer && context.Role != AIRole.DealerPartner)
+                return false;
+
+            return context.CardsLeftMin >= 8 && context.DecisionFrame.TrickIndex <= 12;
+        }
+
+        private int GetProbeCategory(LeadActionEntry entry)
+        {
+            bool allTrump = entry.Cards.Count > 0 && entry.Cards.All(_config.IsTrump);
+            int points = entry.Cards.Sum(card => card.Score);
+            int highControlCards = RuleAIUtility.CountHighControlCards(_config, entry.Cards);
+            bool multiCard = entry.Cards.Count > 1;
+
+            if (!allTrump && points == 0)
+                return multiCard ? 1 : 0;
+
+            if (!allTrump)
+                return multiCard ? 2 : 1;
+
+            if (points == 0 && highControlCards == 0)
+                return 3;
+
+            if (points == 0)
+                return 4;
+
+            return 5;
+        }
+
+        private double GetProbeRiskScore(LeadActionEntry entry)
+        {
+            bool allTrump = entry.Cards.Count > 0 && entry.Cards.All(_config.IsTrump);
+            int highControlCards = RuleAIUtility.CountHighControlCards(_config, entry.Cards);
+
+            return
+                GetProbeCategory(entry) * 10 +
+                entry.Features.GetValueOrDefault("StructureBreakCost") +
+                entry.Features.GetValueOrDefault("HighControlLossCost") +
+                entry.Cards.Sum(card => card.Score) * 0.2 +
+                highControlCards * 1.5 +
+                (entry.Cards.Count - 1) * 0.5 +
+                (allTrump ? 2.0 : 0.0);
         }
 
         private bool HasMateTakeoverEvidence(RuleAIContext context)

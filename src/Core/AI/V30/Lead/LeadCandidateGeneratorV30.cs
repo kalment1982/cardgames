@@ -14,6 +14,7 @@ namespace TractorGame.Core.AI.V30.Lead
         public IReadOnlyList<LeadCandidateV30> Generate(LeadContextV30 context)
         {
             var candidates = new List<LeadCandidateV30>();
+            bool inRun = context.LineState?.IsInRun == true;
 
             if (_ruleEvaluator.IsHighValueSafeThrow(context))
             {
@@ -30,11 +31,13 @@ namespace TractorGame.Core.AI.V30.Lead
 
             if (_ruleEvaluator.ShouldLead001DealerStableSideSuit(context))
             {
+                // Boost to tier 1 when continuing a StableSideSuitRun
+                int tier = inRun && context.LineState!.ActiveLine == LeadLineKind.StableSideSuitRun ? 1 : 2;
                 candidates.Add(new LeadCandidateV30
                 {
                     CandidateId = "lead001.dealer_stable_side",
                     Intent = LeadDecisionIntentV30.StableSideSuitRun,
-                    PriorityTier = 2,
+                    PriorityTier = tier,
                     FutureValue = context.StableSideSuitFutureValue,
                     TriggeredRules = new[] { "Lead-001" }
                 });
@@ -42,11 +45,13 @@ namespace TractorGame.Core.AI.V30.Lead
 
             if (_ruleEvaluator.ShouldLead002StrongScoreSideLead(context))
             {
+                // Boost to tier 1 when continuing a ScorePush
+                int tier = inRun && context.LineState!.ActiveLine == LeadLineKind.ScorePush ? 1 : 3;
                 candidates.Add(new LeadCandidateV30
                 {
                     CandidateId = "lead002.score_side_cash",
                     Intent = LeadDecisionIntentV30.StableSideSuitRun,
-                    PriorityTier = 3,
+                    PriorityTier = tier,
                     FutureValue = context.StrongScoreSideLeadFutureValue,
                     TriggeredRules = new[] { "Lead-002" }
                 });
@@ -77,7 +82,9 @@ namespace TractorGame.Core.AI.V30.Lead
                 });
             }
 
-            if (_ruleEvaluator.ShouldLead003ForceTrump(context))
+            // Suppress ForceTrump when in a StableSideSuitRun
+            if (_ruleEvaluator.ShouldLead003ForceTrump(context) &&
+                !(inRun && context.LineState!.ActiveLine == LeadLineKind.StableSideSuitRun))
             {
                 candidates.Add(new LeadCandidateV30
                 {
@@ -141,7 +148,22 @@ namespace TractorGame.Core.AI.V30.Lead
                 });
             }
 
-            if (context.HasProbePlan || candidates.Count == 0)
+            // Suppress ProbeWeakSuit when in a run (unless no other candidates)
+            bool suppressProbe = inRun && context.LineState!.ConsecutiveWins >= 1;
+            if (!suppressProbe && (context.HasProbePlan || candidates.Count == 0))
+            {
+                candidates.Add(new LeadCandidateV30
+                {
+                    CandidateId = "lead004.low_value_probe",
+                    Intent = LeadDecisionIntentV30.ProbeWeakSuit,
+                    PriorityTier = 8,
+                    FutureValue = context.ProbeFutureValue,
+                    TriggeredRules = new[] { "Lead-004" }
+                });
+            }
+
+            // Fallback: always need at least one candidate
+            if (candidates.Count == 0)
             {
                 candidates.Add(new LeadCandidateV30
                 {

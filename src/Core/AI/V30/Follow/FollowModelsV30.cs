@@ -6,7 +6,9 @@ namespace TractorGame.Core.AI.V30.Follow
     public enum FollowOverlayIntentV30
     {
         PassToMate,
+        TakeLead,
         TakeScore,
+        PrepareEndgame,
         MinimizeLoss
     }
 
@@ -25,6 +27,7 @@ namespace TractorGame.Core.AI.V30.Follow
         public int OverlayScore { get; init; }
         public int ControlSpendCost { get; init; }
         public int CandidatePoints { get; init; }
+        public int DiscardStrengthCost { get; init; }
         public string Reason { get; init; } = string.Empty;
     }
 
