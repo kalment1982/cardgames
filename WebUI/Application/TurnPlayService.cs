@@ -31,6 +31,27 @@ public sealed class TurnPlayService
         int trickIndex = getTrickNumber() + 1;
         int trickPosition = trickSnapshot.Count + 1;
         bool isLastPlayer = trickSnapshot.Count == 3;
+        bool isLead = trickSnapshot.Count == 0;
+        int leadPlayer = isLead ? playerIndex : trickSnapshot[0].PlayerIndex;
+        string trickId = $"trick_{trickIndex:D4}";
+        string turnId = $"turn_{game.CurrentTurnNo:D4}";
+        var auditConfig = GameSessionService.BuildCurrentConfigForAudit(game);
+        object[] handsBeforeTrick = isLead
+            ? GameSessionService.SerializeHandsSnapshotForAudit(game)
+            : Array.Empty<object>();
+        var playerHandBeforePlay = GameSessionService.SerializeCardsForAudit(game.State.PlayerHands[playerIndex], auditConfig).Cast<object>().ToArray();
+        var trickCardsBeforePlay = GameSessionService.SerializePlaysForAudit(trickSnapshot, auditConfig);
+        int currentTrickScoreBefore = trickSnapshot.Sum(play => play.Cards.Sum(card => card.Score));
+        int currentWinnerBefore = trickSnapshot.Count > 0
+            ? new TrickJudge(auditConfig).DetermineWinner(trickSnapshot)
+            : -1;
+        object[] currentWinningCardsBefore = trickSnapshot.Count > 0
+            ? GameSessionService.SerializeCardsForAudit(
+                    trickSnapshot.FirstOrDefault(play => play.PlayerIndex == currentWinnerBefore)?.Cards ?? Enumerable.Empty<Card>(),
+                    auditConfig)
+                .Cast<object>()
+                .ToArray()
+            : Array.Empty<object>();
 
         if (isLastPlayer)
         {
@@ -56,8 +77,19 @@ public sealed class TurnPlayService
                 actor,
                 playerIndex,
                 trickIndex,
+                trickNo = trickIndex,
+                trickId,
+                turnId,
                 trickPosition,
+                isLead,
+                leadPlayer,
                 cards = serializeCards(cards),
+                handsBeforeTrick,
+                playerHandBeforePlay,
+                trickCardsBeforePlay,
+                currentTrickScoreBefore,
+                currentWinnerBefore,
+                currentWinningCardsBefore,
                 phase = game.State.Phase.ToString(),
                 currentPlayer = game.State.CurrentPlayer,
                 reasonCode = playResult.ReasonCode ?? ReasonCodes.UnknownError
@@ -72,9 +104,22 @@ public sealed class TurnPlayService
             actor,
             playerIndex,
             trickIndex,
+            trickNo = trickIndex,
+            trickId,
+            turnId,
             trickPosition,
+            isLead,
+            leadPlayer,
             cards = serializeCards(cards),
             leadCards = trickSnapshot.Count > 0 ? serializeCards(trickSnapshot[0].Cards) : Array.Empty<object>(),
+            handsBeforeTrick,
+            playerHandBeforePlay,
+            playerHandAfterPlay = GameSessionService.SerializeCardsForAudit(game.State.PlayerHands[playerIndex], auditConfig).Cast<object>().ToArray(),
+            trickCardsBeforePlay,
+            trickCardsAfterPlay = GameSessionService.SerializePlaysForAudit(game.CurrentTrick, auditConfig),
+            currentTrickScoreBefore,
+            currentWinnerBefore,
+            currentWinningCardsBefore,
             defenderScoreBefore,
             defenderScoreAfter = game.State.DefenderScore
         });
@@ -96,12 +141,20 @@ public sealed class TurnPlayService
             {
                 type = "trick_end",
                 trickIndex = currentTrickNo,
+                trickNo = currentTrickNo,
+                trickId = $"trick_{currentTrickNo:D4}",
                 winner,
+                winnerIndex = winner,
                 trickScore,
+                trick_score = trickScore,
                 defenderScoreBefore,
                 defenderScoreAfter,
                 defenderScoreDelta = defenderScoreAfter - defenderScoreBefore,
-                plays = serializePlays(completedTrick)
+                leadPlayer,
+                plays = serializePlays(completedTrick),
+                trickCards = serializePlays(completedTrick),
+                handsBeforeTrick,
+                handsAfterTrick = GameSessionService.SerializeHandsSnapshotForAudit(game)
             });
         }
 
@@ -111,7 +164,8 @@ public sealed class TurnPlayService
             {
                 type = "game_finished",
                 defenderScore = game.State.DefenderScore,
-                trickCount = getTrickNumber()
+                trickCount = getTrickNumber(),
+                trickNo = getTrickNumber()
             });
         }
 

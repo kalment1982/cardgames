@@ -1,0 +1,1216 @@
+@page "/review"
+@layout ReviewLayout
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using Microsoft.JSInterop
+@using WebUI.Application
+@implements IAsyncDisposable
+@inject ReviewApiClient ReviewApi
+@inject IJSRuntime JS
+
+<PageTitle>对局 Review</PageTitle>
+
+<div class="review-root">
+    <main class="review-main">
+        <header class="review-topbar">
+            <div class="review-topbar-left">
+                <h1>AI 对局 Review</h1>
+                <div class="review-uid" title="@CurrentTrickUid">@CurrentTrickUid</div>
+            </div>
+            <div class="review-topbar-actions">
+                <label class="session-picker">
+                    对局
+                    <select value="@SelectedSessionId" @onchange="OnSessionChanged" disabled="@(Sessions.Count == 0 || IsBusy)">
+                        @if (Sessions.Count == 0)
+                        {
+                            <option value="">暂无对局</option>
+                        }
+                        else
+                        {
+                            @foreach (var item in Sessions)
+                            {
+                                <option value="@item.SessionId">@BuildSessionOptionLabel(item)</option>
+                            }
+                        }
+                    </select>
+                </label>
+                <button class="btn-primary" @onclick="PrevTrick" disabled="@(!HasPrevTrick)">上一墩</button>
+                <button class="btn-primary" @onclick="NextTrick" disabled="@(!HasNextTrick)">下一墩</button>
+                <label class="jump-box">
+                    跳墩
+                    <input type="number" min="1" value="@JumpTrickNoText" @onchange="OnJumpTrickChanged" />
+                </label>
+                <button class="btn-secondary" @onclick="RefreshAsync" disabled="@IsBusy">刷新</button>
+                <button class="btn-secondary" @onclick="ToggleBottomCards" disabled="@(!HasBottomCards)">
+                    @(ShowBottomCards ? "隐藏底牌" : "查看底牌")
+                </button>
+                <button class="btn-secondary" @onclick="OpenAllDetailsModal" disabled="@(CurrentTrick == null)">额外信息</button>
+                <button class="btn-secondary" @onclick="CopyIssueLocatorAsync">复制问题定位</button>
+            </div>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(SessionError))
+        {
+            <div class="review-error review-error-main">@SessionError</div>
+        }
+
+        @if (CurrentTrick == null)
+        {
+            <div class="review-empty review-empty-main">选择一个对局开始 Review</div>
+        }
+        else
+        {
+            <section class="review-meta-strip">
+                <span>round: @(Detail?.Summary.RoundId ?? "-")</span>
+                <span>庄家: @DisplayPlayer(Detail?.Summary.DealerIndex ?? -1)</span>
+                <span>主花色: <span class="meta-suit @GetSuitCssClass(Detail?.Summary.TrumpSuit)">@DisplayTrumpSuitSymbol(Detail?.Summary.TrumpSuit)</span></span>
+                <span>级牌: @DisplayLevelRankShort(Detail?.Summary.LevelRank)</span>
+                <span>当前墩: @CurrentTrick.TrickNo/@TotalTricks</span>
+                <span>首发: @DisplayPlayer(CurrentTrick.LeadPlayer)</span>
+                <span>赢家: @DisplayPlayer(CurrentTrick.WinnerIndex)</span>
+                <span>本墩分: @CurrentTrick.TrickScore</span>
+                <span>闲家分: @CurrentTrick.DefenderScoreBefore -> @CurrentTrick.DefenderScoreAfter</span>
+                <span>日志: @ReplayCompletenessLabel</span>
+                <span>告警: @SessionWarningCount</span>
+            </section>
+
+            <section class="review-stage-grid">
+                <section class="review-table">
+                    <div class="hand-panel north">
+                        <button class="seat-inline-badge north @(CurrentTrick.LeadPlayer == 2 ? "lead" : "") @(CurrentTrick.WinnerIndex == 2 ? "winner" : "")" @onclick="() => OpenPlayerDetailsModal(2)">
+                            <span class="seat-avatar">北</span>
+                            <span class="seat-main">
+                                <span class="seat-name-line">
+                                    <span class="seat-name">北家</span>
+                                    <span class="seat-ai-badge @GetPlayerAiBadgeClass(2)">@GetPlayerAiLine(2)</span>
+                                    @if (IsDealer(2))
+                                    {
+                                        <span class="dealer-badge">庄</span>
+                                    }
+                                </span>
+                                <span class="seat-meta">@PlayerHandCount(2) 张</span>
+                            </span>
+                        </button>
+                        @RenderHand(2, "north")
+                    </div>
+
+                    <div class="review-center-row">
+                        <div class="hand-panel west">
+                            <button class="seat-inline-badge west @(CurrentTrick.LeadPlayer == 3 ? "lead" : "") @(CurrentTrick.WinnerIndex == 3 ? "winner" : "")" @onclick="() => OpenPlayerDetailsModal(3)">
+                                <span class="seat-avatar">西</span>
+                                <span class="seat-main">
+                                    <span class="seat-name-line">
+                                        <span class="seat-name">西家</span>
+                                        <span class="seat-ai-badge @GetPlayerAiBadgeClass(3)">@GetPlayerAiLine(3)</span>
+                                        @if (IsDealer(3))
+                                        {
+                                            <span class="dealer-badge">庄</span>
+                                        }
+                                    </span>
+                                    <span class="seat-meta">@PlayerHandCount(3) 张</span>
+                                </span>
+                            </button>
+                            @RenderHand(3, "west")
+                        </div>
+
+                        <div class="review-play-area">
+                            @{
+                                var northPlay = FindPlayForPlayer(2);
+                                var westPlay = FindPlayForPlayer(3);
+                                var eastPlay = FindPlayForPlayer(1);
+                                var southPlay = FindPlayForPlayer(0);
+                            }
+
+                            <div class="review-play-slot north @(northPlay?.PlayerIndex == CurrentTrick.WinnerIndex ? "winner" : "")">
+                                @if (northPlay != null)
+                                {
+                                    <span class="play-order @(northPlay.PlayOrder == 1 ? "lead-order" : "")">@(northPlay.PlayOrder == 1 ? "首" : northPlay.PlayOrder.ToString())</span>
+                                    <div class="review-play-cards">
+                                        @foreach (var card in northPlay.Cards)
+                                        {
+                                            @RenderCard(card, "trick")
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="review-play-middle-row">
+                                <div class="review-play-slot west @(westPlay?.PlayerIndex == CurrentTrick.WinnerIndex ? "winner" : "")">
+                                    @if (westPlay != null)
+                                    {
+                                        <span class="play-order @(westPlay.PlayOrder == 1 ? "lead-order" : "")">@(westPlay.PlayOrder == 1 ? "首" : westPlay.PlayOrder.ToString())</span>
+                                        <div class="review-play-cards">
+                                            @foreach (var card in westPlay.Cards)
+                                            {
+                                                @RenderCard(card, "trick")
+                                            }
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="review-play-slot east @(eastPlay?.PlayerIndex == CurrentTrick.WinnerIndex ? "winner" : "")">
+                                    @if (eastPlay != null)
+                                    {
+                                        <span class="play-order @(eastPlay.PlayOrder == 1 ? "lead-order" : "")">@(eastPlay.PlayOrder == 1 ? "首" : eastPlay.PlayOrder.ToString())</span>
+                                        <div class="review-play-cards">
+                                            @foreach (var card in eastPlay.Cards)
+                                            {
+                                                @RenderCard(card, "trick")
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="review-play-slot south @(southPlay?.PlayerIndex == CurrentTrick.WinnerIndex ? "winner" : "")">
+                                @if (southPlay != null)
+                                {
+                                    <span class="play-order @(southPlay.PlayOrder == 1 ? "lead-order" : "")">@(southPlay.PlayOrder == 1 ? "首" : southPlay.PlayOrder.ToString())</span>
+                                    <div class="review-play-cards">
+                                        @foreach (var card in southPlay.Cards)
+                                        {
+                                            @RenderCard(card, "trick")
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="hand-panel east">
+                            <button class="seat-inline-badge east @(CurrentTrick.LeadPlayer == 1 ? "lead" : "") @(CurrentTrick.WinnerIndex == 1 ? "winner" : "")" @onclick="() => OpenPlayerDetailsModal(1)">
+                                <span class="seat-avatar">东</span>
+                                <span class="seat-main">
+                                    <span class="seat-name-line">
+                                        <span class="seat-name">东家</span>
+                                        <span class="seat-ai-badge @GetPlayerAiBadgeClass(1)">@GetPlayerAiLine(1)</span>
+                                        @if (IsDealer(1))
+                                        {
+                                            <span class="dealer-badge">庄</span>
+                                        }
+                                    </span>
+                                    <span class="seat-meta">@PlayerHandCount(1) 张</span>
+                                </span>
+                            </button>
+                            @RenderHand(1, "east")
+                        </div>
+                    </div>
+
+                    <div class="hand-panel south">
+                        <button class="seat-inline-badge south @(CurrentTrick.LeadPlayer == 0 ? "lead" : "") @(CurrentTrick.WinnerIndex == 0 ? "winner" : "")" @onclick="() => OpenPlayerDetailsModal(0)">
+                            <span class="seat-avatar">南</span>
+                            <span class="seat-main">
+                                <span class="seat-name-line">
+                                    <span class="seat-name">南家</span>
+                                    <span class="seat-ai-badge @GetPlayerAiBadgeClass(0)">@GetPlayerAiLine(0)</span>
+                                    @if (IsDealer(0))
+                                    {
+                                        <span class="dealer-badge">庄</span>
+                                    }
+                                </span>
+                                <span class="seat-meta">@PlayerHandCount(0) 张</span>
+                            </span>
+                        </button>
+                        @RenderHand(0, "south")
+                    </div>
+                </section>
+            </section>
+
+            @if (ShowBottomCards)
+            {
+                <section class="review-bottom-panel">
+                    <h3>底牌</h3>
+                    @if (BottomCards.Count == 0)
+                    {
+                        <div class="review-empty small">当前对局未提供底牌</div>
+                    }
+                    else
+                    {
+                        <div class="bottom-cards">
+                            @foreach (var card in BottomCards)
+                            {
+                                @RenderCard(card, "bottom")
+                            }
+                        </div>
+                    }
+                </section>
+            }
+        }
+    </main>
+</div>
+
+@if (ShowDetailsModal && CurrentTrick != null)
+{
+    <div class="review-modal-backdrop" @onclick="CloseDetailsModal">
+        <section class="review-modal" @onclick:stopPropagation="true">
+            <header class="review-modal-head">
+                <div>
+                    <h3>@DetailsModalTitle</h3>
+                    <div class="review-modal-sub">@CurrentTrickUid</div>
+                </div>
+                <button class="btn-secondary" @onclick="CloseDetailsModal">关闭</button>
+            </header>
+
+            <div class="review-modal-body">
+                @if (!string.IsNullOrWhiteSpace(CurrentTrick.WinnerReason))
+                {
+                    <div class="judge-reason">判定依据：@CurrentTrick.WinnerReason</div>
+                }
+                @if (SessionWarnings.Count > 0)
+                {
+                    <section class="review-warning-panel review-warning-panel-modal">
+                        <h3>日志告警</h3>
+                        @foreach (var warning in SessionWarnings)
+                        {
+                            <div class="warning-line">@warning</div>
+                        }
+                    </section>
+                }
+                @if (ModalDecisions.Count == 0)
+                {
+                    <div class="review-empty small">本墩无决策摘要</div>
+                }
+                else
+                {
+                    @foreach (var decision in ModalDecisions)
+                    {
+                        var actualPlay = FindPlayForPlayer(decision.PlayerIndex);
+                        var playMatches = DecisionMatchesActualPlay(decision, actualPlay);
+                        <article class="decision-card">
+                            <header>
+                                <strong>@DisplayPlayer(decision.PlayerIndex)</strong>
+                                <span class="ai-line">@DisplayText(decision.AiLine)</span>
+                                <span>@DisplayText(decision.Phase)</span>
+                                <span class="play-result @DecisionVsPlayClass(playMatches, actualPlay)">@DecisionVsPlayLabel(playMatches, actualPlay)</span>
+                                <button class="btn-inline" @onclick="() => CopyDecisionLocatorAsync(decision)">复制定位</button>
+                            </header>
+                            <div class="line"><span>path</span><strong>@DisplayText(decision.Path)</strong></div>
+                            <div class="line"><span>phase_policy</span><strong>@DisplayText(decision.PhasePolicy)</strong></div>
+                            <div class="line"><span>trace</span><strong>@DisplayText(decision.DecisionTraceId)</strong></div>
+                            <div class="line"><span>intent</span><strong>@DisplayText(decision.PrimaryIntent)</strong></div>
+                            <div class="line"><span>secondary</span><strong>@DisplayText(decision.SecondaryIntent)</strong></div>
+                            <div class="line"><span>reason</span><strong>@DisplayText(decision.SelectedReason)</strong></div>
+                            <div class="line"><span>candidate</span><strong>@DisplayText(decision.SelectedCandidateId)</strong></div>
+                            <div class="line"><span>turn</span><strong>@DisplayText(decision.TurnId)</strong></div>
+                            <div class="line"><span>位置</span><strong>@(decision.PlayPosition > 0 ? decision.PlayPosition.ToString() : "-")</strong></div>
+                            <div class="line rules"><span>rules</span><strong>@(decision.TriggeredRules.Count == 0 ? "-" : string.Join(", ", decision.TriggeredRules))</strong></div>
+                            <div class="line"><span>落地结果</span><strong>@DecisionVsPlayLabel(playMatches, actualPlay)</strong></div>
+                            @if (!string.IsNullOrWhiteSpace(decision.V30Mode) || !string.IsNullOrWhiteSpace(decision.V30PrimaryIntent) || !string.IsNullOrWhiteSpace(decision.V30SelectedReason))
+                            {
+                                <div class="v30-extra">
+                                    <div class="line"><span>v30.mode</span><strong>@DisplayText(decision.V30Mode)</strong></div>
+                                    <div class="line"><span>v30.intent</span><strong>@DisplayText(decision.V30PrimaryIntent)</strong></div>
+                                    <div class="line"><span>v30.reason</span><strong>@DisplayText(decision.V30SelectedReason)</strong></div>
+                                    <div class="line"><span>v30.candidates</span><strong>@(decision.V30CandidateCount > 0 ? decision.V30CandidateCount.ToString() : "-")</strong></div>
+                                </div>
+                            }
+                            <div class="cards-block">
+                                <div class="cards-label">AI 选择</div>
+                                <div class="cards-inline">
+                                    @if (decision.SelectedCards.Count == 0)
+                                    {
+                                        <span>-</span>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var card in decision.SelectedCards)
+                                        {
+                                            @RenderCard(card, "mini")
+                                        }
+                                    }
+                                </div>
+                            </div>
+                            <div class="cards-block">
+                                <div class="cards-label">实际出牌</div>
+                                <div class="cards-inline">
+                                    @if (actualPlay?.Cards.Count > 0)
+                                    {
+                                        @foreach (var card in actualPlay.Cards)
+                                        {
+                                            @RenderCard(card, "mini")
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span>-</span>
+                                    }
+                                </div>
+                            </div>
+                        </article>
+                    }
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private const int InitialSessionLimit = 20;
+    private readonly List<ReviewSessionListItem> Sessions = new();
+    private ReviewSessionDetail? Detail;
+    private string? SelectedSessionId;
+    private int? DetailsModalPlayerIndex;
+    private int TrickIndex;
+    private bool IsBusy;
+    private bool ShowBottomCards;
+    private bool ShowDetailsModal;
+    private string SessionsError = string.Empty;
+    private string SessionError = string.Empty;
+    private string JumpTrickNoText = string.Empty;
+
+    private DotNetObjectReference<Review>? _dotNetRef;
+    private bool _keyboardRegistered;
+
+    private ReviewTrickFrame? CurrentTrick =>
+        Detail?.Tricks != null && Detail.Tricks.Count > 0 && TrickIndex >= 0 && TrickIndex < Detail.Tricks.Count
+            ? Detail.Tricks[TrickIndex]
+            : null;
+
+    private int TotalTricks => Detail?.Tricks?.Count ?? 0;
+
+    private bool HasPrevTrick => CurrentTrick != null && TrickIndex > 0;
+    private bool HasNextTrick => CurrentTrick != null && TrickIndex < TotalTricks - 1;
+    private bool HasBottomCards => BottomCards.Count > 0;
+
+    private IReadOnlyList<string> BottomCards =>
+        Detail?.BottomCards != null ? Detail.BottomCards : Array.Empty<string>();
+
+    private IReadOnlyList<string> SessionWarnings =>
+        Detail?.Warnings != null ? Detail.Warnings : Array.Empty<string>();
+
+    private int SessionWarningCount => SessionWarnings.Count;
+
+    private IReadOnlyList<ReviewDecisionFrame> ModalDecisions =>
+        OrderedDecisions
+            .Where(decision => !DetailsModalPlayerIndex.HasValue || decision.PlayerIndex == DetailsModalPlayerIndex.Value)
+            .ToList();
+
+    private string DetailsModalTitle =>
+        DetailsModalPlayerIndex.HasValue
+            ? $"{DisplayPlayer(DetailsModalPlayerIndex.Value)} 额外信息"
+            : "本墩额外信息";
+
+    private string ReplayCompletenessLabel
+    {
+        get
+        {
+            if (Detail?.Tricks == null || Detail.Tricks.Count == 0)
+                return "无数据";
+
+            var completeTricks = Detail.Tricks.Count(trick => trick.HandsBefore.Count == 4 && trick.Plays.Count == 4);
+            if (completeTricks == Detail.Tricks.Count)
+                return "完整回放";
+            if (completeTricks > 0)
+                return $"部分完整 ({completeTricks}/{Detail.Tricks.Count})";
+
+            var hasAnyDecision = Detail.Tricks.Any(trick => trick.Decisions.Count > 0);
+            return hasAnyDecision ? "仅决策日志" : "摘要不足";
+        }
+    }
+
+    private IReadOnlyList<ReviewPlayFrame> OrderedPlays
+    {
+        get
+        {
+            if (CurrentTrick?.Plays == null)
+                return Array.Empty<ReviewPlayFrame>();
+
+            return CurrentTrick.Plays
+                .OrderBy(play => play.PlayOrder > 0 ? play.PlayOrder : int.MaxValue)
+                .ThenBy(play => play.PlayerIndex)
+                .ToList();
+        }
+    }
+
+    private IReadOnlyList<ReviewDecisionFrame> OrderedDecisions
+    {
+        get
+        {
+            if (CurrentTrick?.Decisions == null)
+                return Array.Empty<ReviewDecisionFrame>();
+
+            return CurrentTrick.Decisions
+                .OrderBy(decision => ParseTurnSequence(decision.TurnId, decision.PlayPosition))
+                .ThenBy(decision => decision.PlayerIndex)
+                .ToList();
+        }
+    }
+
+    private string CurrentTrickUid
+    {
+        get
+        {
+            var sessionKey = Detail?.Summary.RoundId;
+            if (string.IsNullOrWhiteSpace(sessionKey))
+                sessionKey = Detail?.Summary.SessionId ?? "-";
+
+            var trickToken = CurrentTrick?.TrickId;
+            if (string.IsNullOrWhiteSpace(trickToken) && CurrentTrick?.TrickNo > 0)
+                trickToken = $"trick_{CurrentTrick.TrickNo:D4}";
+
+            return $"{sessionKey}#{(string.IsNullOrWhiteSpace(trickToken) ? "-" : trickToken)}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSessionsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _keyboardRegistered)
+            return;
+
+        _dotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("tractorReview.registerHotkeys", _dotNetRef);
+        _keyboardRegistered = true;
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadSessionsAsync();
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        IsBusy = true;
+        SessionsError = string.Empty;
+        SessionError = string.Empty;
+        try
+        {
+            var items = await ReviewApi.GetSessionsAsync(InitialSessionLimit);
+            Sessions.Clear();
+            Sessions.AddRange(items);
+
+            if (Sessions.Count == 0)
+            {
+                Detail = null;
+                SelectedSessionId = null;
+                TrickIndex = 0;
+                JumpTrickNoText = string.Empty;
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(SelectedSessionId) || Sessions.All(s => !string.Equals(s.SessionId, SelectedSessionId, StringComparison.Ordinal)))
+                SelectedSessionId = Sessions[0].SessionId;
+
+            if (!string.IsNullOrWhiteSpace(SelectedSessionId))
+                await LoadSessionAsync(SelectedSessionId);
+        }
+        catch (Exception ex)
+        {
+            SessionsError = $"加载对局列表失败: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SelectSessionAsync(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || string.Equals(sessionId, SelectedSessionId, StringComparison.Ordinal))
+            return;
+
+        SelectedSessionId = sessionId;
+        await LoadSessionAsync(sessionId);
+    }
+
+    private async Task LoadSessionAsync(string sessionId)
+    {
+        SessionError = string.Empty;
+        try
+        {
+            var detail = await ReviewApi.GetSessionAsync(sessionId);
+            if (detail == null)
+            {
+                SessionError = "该对局详情不可用。";
+                Detail = null;
+                return;
+            }
+
+            Detail = detail;
+            TrickIndex = 0;
+            CloseDetailsModal();
+            JumpTrickNoText = CurrentTrick?.TrickNo > 0 ? CurrentTrick.TrickNo.ToString() : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            SessionError = $"加载对局详情失败: {ex.Message}";
+            Detail = null;
+        }
+    }
+
+    private async Task OnSessionChanged(ChangeEventArgs args)
+    {
+        var sessionId = args.Value?.ToString() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return;
+
+        await SelectSessionAsync(sessionId);
+    }
+
+    private void PrevTrick()
+    {
+        if (!HasPrevTrick)
+            return;
+
+        TrickIndex--;
+        CloseDetailsModal();
+        JumpTrickNoText = CurrentTrick?.TrickNo > 0 ? CurrentTrick.TrickNo.ToString() : string.Empty;
+    }
+
+    private void NextTrick()
+    {
+        if (!HasNextTrick)
+            return;
+
+        TrickIndex++;
+        CloseDetailsModal();
+        JumpTrickNoText = CurrentTrick?.TrickNo > 0 ? CurrentTrick.TrickNo.ToString() : string.Empty;
+    }
+
+    private void OnJumpTrickChanged(ChangeEventArgs args)
+    {
+        JumpTrickNoText = args.Value?.ToString() ?? string.Empty;
+        if (!int.TryParse(JumpTrickNoText, out var trickNo) || trickNo <= 0 || Detail?.Tricks == null || Detail.Tricks.Count == 0)
+            return;
+
+        var index = Detail.Tricks.FindIndex(trick => trick.TrickNo == trickNo);
+        if (index >= 0)
+        {
+            TrickIndex = index;
+            CloseDetailsModal();
+        }
+    }
+
+    private void ToggleBottomCards()
+    {
+        ShowBottomCards = !ShowBottomCards;
+    }
+
+    private void OpenAllDetailsModal()
+    {
+        DetailsModalPlayerIndex = null;
+        ShowDetailsModal = true;
+    }
+
+    private void OpenPlayerDetailsModal(int playerIndex)
+    {
+        DetailsModalPlayerIndex = playerIndex;
+        ShowDetailsModal = true;
+    }
+
+    private void CloseDetailsModal()
+    {
+        ShowDetailsModal = false;
+        DetailsModalPlayerIndex = null;
+    }
+
+    private int PlayerHandCount(int playerIndex)
+    {
+        var hand = CurrentTrick?.HandsBefore.FirstOrDefault(item => item.PlayerIndex == playerIndex);
+        if (hand == null)
+            return 0;
+
+        if (hand.HandCount > 0)
+            return hand.HandCount;
+
+        return hand.Cards.Count;
+    }
+
+    private string DisplayPlayer(int playerIndex)
+    {
+        return playerIndex switch
+        {
+            0 => "南家",
+            1 => "东家",
+            2 => "北家",
+            3 => "西家",
+            _ => "未知"
+        };
+    }
+
+    private string GetPlayerAiLine(int playerIndex)
+    {
+        var summaryLine = Detail?.Summary.PlayerAiLines
+            .FirstOrDefault(item => item.PlayerIndex == playerIndex)?
+            .AiLine;
+        if (!string.IsNullOrWhiteSpace(summaryLine))
+            return summaryLine.ToUpperInvariant();
+
+        if (Detail?.Tricks != null)
+        {
+            var grouped = Detail.Tricks
+                .SelectMany(trick => trick.Decisions)
+                .Where(decision => decision.PlayerIndex == playerIndex && !string.IsNullOrWhiteSpace(decision.AiLine))
+                .GroupBy(decision => decision.AiLine!, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(group => group.Count())
+                .FirstOrDefault();
+
+            if (grouped != null)
+                return grouped.Key.ToUpperInvariant();
+        }
+
+        var current = CurrentTrick?.Decisions.FirstOrDefault(item => item.PlayerIndex == playerIndex);
+        return string.IsNullOrWhiteSpace(current?.AiLine) ? "-" : current!.AiLine!.ToUpperInvariant();
+    }
+
+    private string GetPlayerAiBadgeClass(int playerIndex)
+    {
+        var ai = GetPlayerAiLine(playerIndex);
+        return ai switch
+        {
+            "V30" => "v30",
+            "V21" => "v21",
+            "LEGACY" => "legacy",
+            "HUMAN" => "human",
+            _ => "unknown"
+        };
+    }
+
+    private string DisplayText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "-" : value;
+    }
+
+    private ReviewPlayFrame? FindPlayForPlayer(int playerIndex)
+    {
+        return CurrentTrick?.Plays.FirstOrDefault(play => play.PlayerIndex == playerIndex);
+    }
+
+    private static bool? DecisionMatchesActualPlay(ReviewDecisionFrame decision, ReviewPlayFrame? play)
+    {
+        if (play == null || play.Cards.Count == 0 || decision.SelectedCards.Count == 0)
+            return null;
+
+        if (play.Cards.Count != decision.SelectedCards.Count)
+            return false;
+
+        for (var i = 0; i < play.Cards.Count; i++)
+        {
+            if (!string.Equals(play.Cards[i], decision.SelectedCards[i], StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static string DecisionVsPlayLabel(bool? matches, ReviewPlayFrame? play)
+    {
+        if (play == null || play.Cards.Count == 0)
+            return "无实出牌记录";
+        if (!matches.HasValue)
+            return "缺少 AI 选牌";
+        return matches.Value ? "与实际出牌一致" : "与实际出牌不一致";
+    }
+
+    private static string DecisionVsPlayClass(bool? matches, ReviewPlayFrame? play)
+    {
+        if (play == null || play.Cards.Count == 0)
+            return "unknown";
+        if (!matches.HasValue)
+            return "pending";
+        return matches.Value ? "match" : "mismatch";
+    }
+
+    private string DisplaySessionTitle(ReviewSessionListItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.RoundId))
+            return item.RoundId;
+        if (!string.IsNullOrWhiteSpace(item.GameId))
+            return item.GameId;
+        return item.SessionId;
+    }
+
+    private string DisplaySessionSource(ReviewSessionListItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.SourceLabel))
+            return item.SourceLabel;
+        if (!string.IsNullOrWhiteSpace(item.SourceTag))
+            return item.SourceTag;
+        return "未知来源";
+    }
+
+    private string DisplayAiSummary(string? summary, ReviewAiLineBreakdown? breakdown)
+    {
+        if (!string.IsNullOrWhiteSpace(summary))
+            return summary;
+
+        if (breakdown == null)
+            return "-";
+
+        var parts = new List<string>();
+        if (breakdown.V30Decisions > 0)
+            parts.Add($"V30:{breakdown.V30Decisions}");
+        if (breakdown.V21Decisions > 0)
+            parts.Add($"V21:{breakdown.V21Decisions}");
+        if (breakdown.LegacyDecisions > 0)
+            parts.Add($"Legacy:{breakdown.LegacyDecisions}");
+        if (breakdown.OtherDecisions > 0)
+            parts.Add($"Other:{breakdown.OtherDecisions}");
+
+        return parts.Count == 0 ? "-" : string.Join(" | ", parts);
+    }
+
+    private string BuildSessionOptionLabel(ReviewSessionListItem item)
+    {
+        var round = item.RoundId ?? item.GameId ?? item.SessionId;
+        if (round.Length > 22)
+            round = round[^22..];
+
+        return $"{round} | {DisplaySessionSource(item)} | {item.TrickCount}墩";
+    }
+
+    private static string DisplayStartedAt(DateTime? value)
+    {
+        if (!value.HasValue)
+            return "-";
+
+        return value.Value.ToLocalTime().ToString("MM-dd HH:mm");
+    }
+
+    private RenderFragment RenderHand(int playerIndex, string orientation) => builder =>
+    {
+        var cards = GetSortedHandCards(playerIndex);
+        if (cards.Count == 0)
+        {
+            builder.OpenElement(0, "div");
+            builder.AddAttribute(1, "class", "hand-empty");
+            builder.AddContent(2, "无手牌快照");
+            builder.CloseElement();
+            return;
+        }
+
+        builder.OpenElement(5, "div");
+        builder.AddAttribute(6, "class", $"review-hand-stack {orientation}");
+        builder.AddAttribute(7, "style", BuildHandStackStyle(orientation));
+
+        var seq = 10;
+        if (orientation is "west" or "east")
+        {
+            foreach (var row in cards.Chunk(7))
+            {
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", $"review-hand-row {orientation}");
+                builder.AddAttribute(seq++, "style", BuildHandRowStyle());
+
+                var rowIndex = 0;
+                foreach (var card in row)
+                {
+                    builder.AddContent(seq++, RenderCard(card, "hand", BuildCardStyle("hand", orientation, rowIndex)));
+                    rowIndex++;
+                }
+
+                builder.CloseElement();
+            }
+        }
+        else
+        {
+            for (var i = 0; i < cards.Count; i++)
+            {
+                builder.AddContent(seq++, RenderCard(cards[i], "hand", BuildCardStyle("hand", orientation, i)));
+            }
+        }
+
+        builder.CloseElement();
+    };
+
+    private List<string> GetSortedHandCards(int playerIndex)
+    {
+        var cards = CurrentTrick?.HandsBefore
+            .FirstOrDefault(item => item.PlayerIndex == playerIndex)?
+            .Cards ?? new List<string>();
+
+        return cards
+            .OrderBy(GetCardGroupWeight)
+            .ThenBy(GetCardSuitWeight)
+            .ThenBy(GetCardRankWeight)
+            .ToList();
+    }
+
+    private int GetCardGroupWeight(string cardText)
+    {
+        if (IsJokerCard(cardText))
+            return 0;
+        if (IsTrumpCard(cardText))
+            return 1;
+        return 2;
+    }
+
+    private int GetCardSuitWeight(string cardText)
+    {
+        if (IsJokerCard(cardText))
+            return 0;
+        if (IsTrumpCard(cardText))
+        {
+            var suit = GetCardSuitSymbol(cardText);
+            if (suit == GetTrumpSuitSymbol())
+                return 0;
+            return 1;
+        }
+
+        return GetCardSuitSymbol(cardText) switch
+        {
+            '♠' => 0,
+            '♥' => 1,
+            '♣' => 2,
+            '♦' => 3,
+            _ => 4
+        };
+    }
+
+    private int GetCardRankWeight(string cardText)
+    {
+        if (cardText.Contains("大王", StringComparison.Ordinal))
+            return -200;
+        if (cardText.Contains("小王", StringComparison.Ordinal))
+            return -190;
+
+        var rank = GetCardRankText(cardText);
+        if (string.Equals(rank, GetLevelRankToken(), StringComparison.OrdinalIgnoreCase))
+            return -180;
+
+        return rank switch
+        {
+            "A" => -140,
+            "K" => -130,
+            "Q" => -120,
+            "J" => -110,
+            "10" => -100,
+            "9" => -90,
+            "8" => -80,
+            "7" => -70,
+            "6" => -60,
+            "5" => -50,
+            "4" => -40,
+            "3" => -30,
+            "2" => -20,
+            _ => 0
+        };
+    }
+
+    private bool IsTrumpCard(string cardText)
+    {
+        if (IsJokerCard(cardText))
+            return true;
+
+        var trumpSuit = GetTrumpSuitSymbol();
+        var cardSuit = GetCardSuitSymbol(cardText);
+        if (trumpSuit.HasValue && cardSuit == trumpSuit)
+            return true;
+
+        var levelToken = GetLevelRankToken();
+        var rank = GetCardRankText(cardText);
+        return !string.IsNullOrWhiteSpace(levelToken)
+            && string.Equals(rank, levelToken, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsJokerCard(string cardText)
+    {
+        return cardText.Contains("大王", StringComparison.Ordinal) || cardText.Contains("小王", StringComparison.Ordinal);
+    }
+
+    private bool IsDealer(int playerIndex)
+    {
+        return Detail?.Summary.DealerIndex == playerIndex;
+    }
+
+    private char? GetTrumpSuitSymbol()
+    {
+        return Detail?.Summary.TrumpSuit switch
+        {
+            "Spade" => '♠',
+            "Heart" => '♥',
+            "Club" => '♣',
+            "Diamond" => '♦',
+            _ => null
+        };
+    }
+
+    private static char? GetCardSuitSymbol(string cardText)
+    {
+        if (cardText.Contains('♠'))
+            return '♠';
+        if (cardText.Contains('♥'))
+            return '♥';
+        if (cardText.Contains('♣'))
+            return '♣';
+        if (cardText.Contains('♦'))
+            return '♦';
+        return null;
+    }
+
+    private static string GetCardRankText(string cardText)
+    {
+        return cardText
+            .Replace("♠", string.Empty, StringComparison.Ordinal)
+            .Replace("♥", string.Empty, StringComparison.Ordinal)
+            .Replace("♣", string.Empty, StringComparison.Ordinal)
+            .Replace("♦", string.Empty, StringComparison.Ordinal)
+            .Trim()
+            .ToUpperInvariant()
+            .Replace("T", "10", StringComparison.Ordinal);
+    }
+
+    private string GetLevelRankToken()
+    {
+        return Detail?.Summary.LevelRank switch
+        {
+            "Ace" => "A",
+            "King" => "K",
+            "Queen" => "Q",
+            "Jack" => "J",
+            "Ten" => "10",
+            "Nine" => "9",
+            "Eight" => "8",
+            "Seven" => "7",
+            "Six" => "6",
+            "Five" => "5",
+            "Four" => "4",
+            "Three" => "3",
+            "Two" => "2",
+            _ => string.Empty
+        };
+    }
+
+    private static string DisplayTrumpSuitSymbol(string? trumpSuit)
+    {
+        return trumpSuit switch
+        {
+            "Spade" => "♠",
+            "Heart" => "♥",
+            "Club" => "♣",
+            "Diamond" => "♦",
+            "NoTrump" => "无主",
+            _ => "-"
+        };
+    }
+
+    private static string GetSuitCssClass(string? trumpSuit)
+    {
+        return trumpSuit switch
+        {
+            "Spade" => "spade",
+            "Heart" => "heart",
+            "Club" => "club",
+            "Diamond" => "diamond",
+            "NoTrump" => "notrump",
+            _ => "unknown"
+        };
+    }
+
+    private static string DisplayLevelRankShort(string? levelRank)
+    {
+        return levelRank switch
+        {
+            "Ace" => "A",
+            "King" => "K",
+            "Queen" => "Q",
+            "Jack" => "J",
+            "Ten" => "10",
+            "Nine" => "9",
+            "Eight" => "8",
+            "Seven" => "7",
+            "Six" => "6",
+            "Five" => "5",
+            "Four" => "4",
+            "Three" => "3",
+            "Two" => "2",
+            _ => "-"
+        };
+    }
+
+    private RenderFragment RenderCard(string cardText, string mode, string? styleOverride = null) => builder =>
+    {
+        var cardImage = ResolveCardImage(cardText);
+        if (!string.IsNullOrWhiteSpace(cardImage))
+        {
+            builder.OpenElement(0, "img");
+            builder.AddAttribute(1, "class", $"review-card {mode}");
+            builder.AddAttribute(2, "src", cardImage);
+            builder.AddAttribute(3, "alt", cardText);
+            builder.AddAttribute(4, "title", cardText);
+            builder.AddAttribute(5, "style", styleOverride ?? BuildCardStyle(mode));
+            builder.CloseElement();
+            return;
+        }
+
+        builder.OpenElement(6, "span");
+        builder.AddAttribute(7, "class", $"review-card-fallback {mode}");
+        builder.AddAttribute(8, "title", cardText);
+        builder.AddAttribute(9, "style", styleOverride ?? BuildCardStyle(mode));
+        builder.AddContent(10, cardText);
+        builder.CloseElement();
+    };
+
+    private static string BuildHandStackStyle(string orientation)
+    {
+        return orientation switch
+        {
+            "north" or "south" => "display:flex;align-items:flex-end;min-height:74px;padding:2px 6px 4px 10px;overflow:hidden;flex:1 1 auto;min-width:0;",
+            "west" or "east" => "display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:4px;padding:2px 0 2px 8px;overflow:hidden;flex:1 1 auto;min-height:0;min-width:0;",
+            _ => "display:flex;align-items:center;"
+        };
+    }
+
+    private static string BuildHandRowStyle()
+    {
+        return "display:flex;align-items:flex-end;min-width:0;";
+    }
+
+    private static string BuildCardStyle(string mode, string? orientation = null, int cardIndex = 0)
+    {
+        var baseStyle = mode switch
+        {
+            "hand" => "width:48px;height:70px;object-fit:contain;display:block;flex:0 0 auto;",
+            "trick" => "width:46px;height:68px;object-fit:contain;display:block;flex:0 0 auto;",
+            "mini" => "width:22px;height:33px;object-fit:contain;display:block;flex:0 0 auto;",
+            "bottom" => "width:50px;height:74px;object-fit:contain;display:block;flex:0 0 auto;",
+            _ => "width:24px;height:36px;object-fit:contain;display:block;flex:0 0 auto;"
+        };
+
+        if (mode == "hand" && cardIndex > 0)
+        {
+            if (orientation == "north" || orientation == "south")
+                baseStyle += "margin-left:-24px;";
+            else if (orientation == "west" || orientation == "east")
+                baseStyle += "margin-left:-16px;";
+        }
+
+        return baseStyle;
+    }
+
+    private static string? ResolveCardImage(string? cardText)
+    {
+        if (string.IsNullOrWhiteSpace(cardText))
+            return null;
+
+        var text = cardText.Trim();
+        if (text.Contains("大王", StringComparison.Ordinal))
+            return "assets/playingcardshl/red_joker.png";
+        if (text.Contains("小王", StringComparison.Ordinal))
+            return "assets/playingcardshl/black_joker.png";
+
+        string? suit = null;
+        if (text.Contains('♠')) suit = "spades";
+        else if (text.Contains('♥')) suit = "hearts";
+        else if (text.Contains('♣')) suit = "clubs";
+        else if (text.Contains('♦')) suit = "diamonds";
+
+        if (string.IsNullOrWhiteSpace(suit))
+            return null;
+
+        var rankText = text
+            .Replace("♠", string.Empty, StringComparison.Ordinal)
+            .Replace("♥", string.Empty, StringComparison.Ordinal)
+            .Replace("♣", string.Empty, StringComparison.Ordinal)
+            .Replace("♦", string.Empty, StringComparison.Ordinal)
+            .Trim()
+            .ToUpperInvariant();
+
+        var rank = rankText switch
+        {
+            "A" => "ace",
+            "J" => "jack",
+            "Q" => "queen",
+            "K" => "king",
+            "T" => "10",
+            "10" => "10",
+            "9" => "9",
+            "8" => "8",
+            "7" => "7",
+            "6" => "6",
+            "5" => "5",
+            "4" => "4",
+            "3" => "3",
+            "2" => "2",
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(rank))
+            return null;
+
+        return $"assets/playingcardshl/{rank}_of_{suit}.png";
+    }
+
+    private async Task CopyIssueLocatorAsync()
+    {
+        if (CurrentTrick == null || Detail?.Summary == null)
+            return;
+
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", CurrentTrickUid);
+    }
+
+    private async Task CopyDecisionLocatorAsync(ReviewDecisionFrame decision)
+    {
+        var trick = CurrentTrick;
+        var summary = Detail?.Summary;
+        if (trick == null || summary == null)
+            return;
+
+        var roundToken = summary.RoundId ?? summary.SessionId;
+        var trickToken = trick.TrickId ?? $"trick_{trick.TrickNo:D4}";
+        var parts = new List<string>
+        {
+            $"问题定位: {roundToken}#{trickToken}",
+            $"玩家: {DisplayPlayer(decision.PlayerIndex)}",
+            $"AI: {DisplayText(decision.AiLine)}",
+            $"阶段: {DisplayText(decision.Phase)}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(decision.TurnId))
+            parts.Add($"turn: {decision.TurnId}");
+
+        if (!string.IsNullOrWhiteSpace(decision.Path))
+            parts.Add($"path: {decision.Path}");
+
+        var text = string.Join("\n", parts) + "\n现象:\n预期:\n备注:";
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+
+    [JSInvokable]
+    public Task HandleReviewHotkey(string key)
+    {
+        if (string.Equals(key, "ArrowLeft", StringComparison.Ordinal))
+            PrevTrick();
+        else if (string.Equals(key, "ArrowRight", StringComparison.Ordinal))
+            NextTrick();
+
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private static int ParseTurnSequence(string? turnId, int playPosition)
+    {
+        if (!string.IsNullOrWhiteSpace(turnId))
+        {
+            var digits = new string(turnId.Where(char.IsDigit).ToArray());
+            if (int.TryParse(digits, out var value))
+                return value;
+        }
+
+        if (playPosition > 0)
+            return playPosition;
+
+        return int.MaxValue;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_keyboardRegistered)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("tractorReview.unregisterHotkeys");
+            }
+            catch
+            {
+                // ignore disposal failures during teardown
+            }
+        }
+
+        _dotNetRef?.Dispose();
+    }
+}

@@ -381,14 +381,12 @@
 
     private string GetAiLineLabel()
     {
-        var options = RuleAIOptionsProvider.Options;
-        if (options.UseRuleAIV30)
-            return "RuleAI V30";
-
-        if (options.UseRuleAIV21)
-            return "RuleAI V21";
-
-        return "Legacy RuleAI";
+        return GetCurrentAiLineCode() switch
+        {
+            "V30" => "RuleAI V30",
+            "V21" => "RuleAI V21",
+            _ => "Legacy RuleAI"
+        };
     }
 
     private string GetAiLineDescription()
@@ -403,6 +401,30 @@
             return "WebUI 当前使用 RuleAI V21 进行对战。";
 
         return "WebUI 当前使用 Legacy RuleAI 进行对战。";
+    }
+
+    private string GetCurrentAiLineCode()
+    {
+        var options = RuleAIOptionsProvider.Options;
+        if (options.UseRuleAIV30)
+            return "V30";
+
+        if (options.UseRuleAIV21)
+            return "V21";
+
+        return "Legacy";
+    }
+
+    private object[] BuildReviewPlayerAiLines()
+    {
+        var aiLine = GetCurrentAiLineCode();
+        return Enumerable.Range(0, 4)
+            .Select(index => (object)new Dictionary<string, object?>
+            {
+                ["player_index"] = index,
+                ["ai_line"] = index == 0 ? "Human" : aiLine
+            })
+            .ToArray();
     }
 
     private void UpdateUI()
@@ -509,13 +531,10 @@
 
     private object[] SerializeCards(IEnumerable<Card> cards)
     {
-        return cards.Select(c => new
-        {
-            suit = c.Suit.ToString(),
-            rank = c.Rank.ToString(),
-            score = c.Score,
-            text = c.ToString()
-        }).Cast<object>().ToArray();
+        var config = game == null ? null : GameSessionService.BuildCurrentConfigForAudit(game);
+        return GameSessionService.SerializeCardsForAudit(cards, config)
+            .Cast<object>()
+            .ToArray();
     }
 
     private object[] SerializePlays(IEnumerable<TrickPlay> plays)
@@ -881,6 +900,15 @@
         _visibleHandCount = 0;
         _biddingAnimationText = "准备发牌...";
         await InvokeAsync(StateHasChanged);
+
+        await PushTestEventAsync(new
+        {
+            type = "game_start",
+            seed = CurrentSeed,
+            levelRank = game.State.LevelRank.ToString(),
+            dealerIndex = game.State.DealerIndex,
+            playerAiLines = BuildReviewPlayerAiLines()
+        });
 
         try
         {

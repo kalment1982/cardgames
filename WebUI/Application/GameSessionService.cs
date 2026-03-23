@@ -4,6 +4,7 @@ using System.Linq;
 using TractorGame.Core.AI.V21;
 using TractorGame.Core.AI;
 using TractorGame.Core.GameFlow;
+using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
 
@@ -58,6 +59,11 @@ public sealed class GameSessionService
     }
 
     public GameConfig BuildCurrentConfig(Game game)
+    {
+        return BuildCurrentConfigForAudit(game);
+    }
+
+    public static GameConfig BuildCurrentConfigForAudit(Game game)
     {
         return new GameConfig
         {
@@ -139,6 +145,7 @@ public sealed class GameSessionService
 
     public Dictionary<string, object?> BuildAIDebugTruthSnapshot(Game game)
     {
+        var config = BuildCurrentConfigForAudit(game);
         return new Dictionary<string, object?>
         {
             ["current_player"] = game.State.CurrentPlayer,
@@ -147,18 +154,92 @@ public sealed class GameSessionService
                 .Select(index => new Dictionary<string, object?>
                 {
                     ["player_index"] = index,
-                    ["cards"] = SerializeCards(game.State.PlayerHands[index])
+                    ["cards"] = SerializeCardsForAudit(game.State.PlayerHands[index], config)
                 })
                 .ToList(),
             ["current_trick"] = game.CurrentTrick
                 .Select(play => new Dictionary<string, object?>
                 {
                     ["player_index"] = play.PlayerIndex,
-                    ["cards"] = SerializeCards(play.Cards)
+                    ["cards"] = SerializeCardsForAudit(play.Cards, config)
                 })
                 .ToList(),
-            ["bottom_cards"] = SerializeCards(game.BottomCardsSnapshot)
+            ["bottom_cards"] = SerializeCardsForAudit(game.BottomCardsSnapshot, config)
         };
+    }
+
+    public static object[] SerializeHandsSnapshotForAudit(Game game)
+    {
+        var config = new GameConfig
+        {
+            LevelRank = game.State.LevelRank,
+            TrumpSuit = game.State.TrumpSuit ?? game.CurrentBidSuit
+        };
+
+        return Enumerable.Range(0, 4)
+            .Select(index =>
+            {
+                var hand = new List<Card>(game.State.PlayerHands[index]);
+                SortHand(hand, config);
+                return (object)new Dictionary<string, object?>
+                {
+                    ["player_index"] = index,
+                    ["hand_count"] = hand.Count,
+                    ["cards"] = SerializeCardsForAudit(hand, config)
+                };
+            })
+            .ToArray();
+    }
+
+    public static object[] SerializePlaysForAudit(IEnumerable<TrickPlay> plays, GameConfig? config = null)
+    {
+        return plays.Select(play => (object)new Dictionary<string, object?>
+        {
+            ["player_index"] = play.PlayerIndex,
+            ["cards"] = SerializeCardsForAudit(play.Cards, config)
+        }).ToArray();
+    }
+
+    public static Dictionary<string, object?> BuildAuditFactSnapshot(Game game, bool includeHands = false, bool includeBottomCards = false)
+    {
+        var config = BuildCurrentConfigForAudit(game);
+        int currentWinner = -1;
+        List<Card> currentWinningCards = new();
+        if (game.CurrentTrick.Count > 0)
+        {
+            var judge = new TrickJudge(config);
+            currentWinner = judge.DetermineWinner(game.CurrentTrick);
+            currentWinningCards = game.CurrentTrick
+                .FirstOrDefault(play => play.PlayerIndex == currentWinner)?
+                .Cards
+                .ToList() ?? new List<Card>();
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["dealer_index"] = game.State.DealerIndex,
+            ["level_rank"] = game.State.LevelRank.ToString(),
+            ["trump_suit"] = game.State.TrumpSuit?.ToString() ?? "NoTrump",
+            ["is_no_trump"] = !game.State.TrumpSuit.HasValue,
+            ["defender_score"] = game.State.DefenderScore,
+            ["current_player"] = game.State.CurrentPlayer,
+            ["trick_no"] = game.CurrentTrickNo,
+            ["turn_no"] = game.CurrentTurnNo,
+            ["trick_id"] = game.CurrentTrickId,
+            ["turn_id"] = game.CurrentTurnId,
+            ["current_trick"] = SerializePlaysForAudit(game.CurrentTrick, config),
+            ["current_trick_score"] = game.CurrentTrick.Sum(play => play.Cards.Sum(card => card.Score)),
+            ["current_winner"] = currentWinner,
+            ["current_winning_cards"] = SerializeCardsForAudit(currentWinningCards, config)
+        };
+
+        if (includeHands)
+            payload["hands_by_player"] = SerializeHandsSnapshotForAudit(game);
+
+        if (includeBottomCards)
+            payload["bottom_cards"] = SerializeCardsForAudit(game.BottomCardsSnapshot, config);
+
+        return payload;
     }
 
     public static string GetSuitSymbol(Suit suit)
@@ -232,14 +313,13 @@ public sealed class GameSessionService
         return 1;
     }
 
+    public static List<Dictionary<string, object?>> SerializeCardsForAudit(IEnumerable<Card> cards, GameConfig? config = null)
+    {
+        return AuditCardSerializer.SerializeCards(cards, config);
+    }
+
     private static List<Dictionary<string, object?>> SerializeCards(IEnumerable<Card> cards)
     {
-        return cards.Select(card => new Dictionary<string, object?>
-        {
-            ["suit"] = card.Suit.ToString(),
-            ["rank"] = card.Rank.ToString(),
-            ["score"] = card.Score,
-            ["text"] = card.ToString()
-        }).ToList();
+        return SerializeCardsForAudit(cards);
     }
 }

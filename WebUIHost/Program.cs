@@ -1,5 +1,6 @@
 using Microsoft.Extensions.FileProviders;
 using TractorGame.Core.Logging;
+using WebUIHost.Review;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,7 +14,7 @@ if (!Directory.Exists(staticRoot))
     throw new DirectoryNotFoundException($"WebUI static files not found: {staticRoot}. Build WebUI first.");
 }
 var frameworkRoot = ResolveFrameworkRoot(repoRoot);
-var stylesPath = ResolveStylesPath(repoRoot);
+var reviewService = new ReviewLogService(repoRoot);
 
 var fileProvider = new PhysicalFileProvider(staticRoot);
 var logger = GameLoggerFactory.CreateDefault();
@@ -34,6 +35,24 @@ app.MapPost("/api/log-entry", (LogEntry entry) =>
 
     logger.Log(entry);
     return Results.Ok(new { accepted = true });
+});
+
+app.MapGet("/api/review/sessions", (int? limit) =>
+{
+    var response = reviewService.GetSessions(limit);
+    return Results.Ok(response);
+});
+
+app.MapGet("/api/review/session/{sessionId}", (string sessionId) =>
+{
+    if (!ReviewSessionIdCodec.TryDecode(sessionId, out _, out _))
+        return Results.BadRequest(new { error = "Invalid sessionId." });
+
+    var session = reviewService.GetSessionDetail(sessionId, out var error);
+    if (session == null)
+        return Results.NotFound(new { error = error ?? "Session not found." });
+
+    return Results.Ok(session);
 });
 
 app.UseDefaultFiles(new DefaultFilesOptions
@@ -66,14 +85,18 @@ if (Directory.Exists(frameworkRoot))
     });
 }
 
-if (File.Exists(stylesPath))
+app.MapGet("/WebUI.styles.css", async context =>
 {
-    app.MapGet("/WebUI.styles.css", async context =>
+    var stylesPath = ResolveStylesPath(repoRoot);
+    if (!File.Exists(stylesPath))
     {
-        context.Response.ContentType = "text/css; charset=utf-8";
-        await context.Response.SendFileAsync(stylesPath);
-    });
-}
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    context.Response.ContentType = "text/css; charset=utf-8";
+    await context.Response.SendFileAsync(stylesPath);
+});
 
 app.MapFallback(async context =>
 {
@@ -134,6 +157,14 @@ static string ResolveStylesPath(string repoRoot)
     var releasePath = Path.Combine(repoRoot, "WebUI", "obj", "Release", "net6.0", "scopedcss", "bundle", "WebUI.styles.css");
     if (File.Exists(releasePath))
         return releasePath;
+
+    var debugProjectBundle = Path.Combine(repoRoot, "WebUI", "obj", "Debug", "net6.0", "scopedcss", "projectbundle", "WebUI.bundle.scp.css");
+    if (File.Exists(debugProjectBundle))
+        return debugProjectBundle;
+
+    var releaseProjectBundle = Path.Combine(repoRoot, "WebUI", "obj", "Release", "net6.0", "scopedcss", "projectbundle", "WebUI.bundle.scp.css");
+    if (File.Exists(releaseProjectBundle))
+        return releaseProjectBundle;
 
     return debugPath;
 }

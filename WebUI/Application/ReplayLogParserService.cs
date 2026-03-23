@@ -63,6 +63,8 @@ public sealed class ReplayLogParserService
                 {
                     var trickNo = ReadInt(payload, "trick_no");
                     if (trickNo <= 0)
+                        trickNo = ReadInt(payload, "trickIndex");
+                    if (trickNo <= 0)
                         continue;
 
                     var frame = EnsureFrame(frames, trickNo);
@@ -75,9 +77,46 @@ public sealed class ReplayLogParserService
                     continue;
                 }
 
+                if (eventName == "play.accept")
+                {
+                    var trickNo = ReadInt(payload, "trick_no");
+                    if (trickNo <= 0)
+                        trickNo = ReadInt(payload, "trickIndex");
+                    if (trickNo <= 0)
+                        trickNo = ParseTrickNoFromId(ReadString(root, "trick_id"));
+                    if (trickNo <= 0)
+                        continue;
+
+                    var frame = EnsureFrame(frames, trickNo);
+                    frame.LeadPlayer = ReadInt(payload, "lead_player", frame.LeadPlayer);
+                    if (frame.LeadPlayer < 0)
+                        frame.LeadPlayer = ReadInt(payload, "leadPlayer", frame.LeadPlayer);
+
+                    if (frame.HandsBefore.Count == 0 && ReadBool(payload, "is_lead"))
+                        frame.HandsBefore = ParseHands(payload);
+
+                    int playerIndex = ReadInt(payload, "player_index", -1);
+                    if (playerIndex < 0)
+                        playerIndex = ReadInt(payload, "playerIndex", -1);
+
+                    var cards = ReadCardTexts(payload, "cards");
+                    if (playerIndex >= 0 && cards.Count > 0 && frame.Plays.All(play => play.PlayerIndex != playerIndex))
+                    {
+                        frame.Plays.Add(new ReplayPlayerPlay
+                        {
+                            PlayerIndex = playerIndex,
+                            Cards = cards
+                        });
+                    }
+
+                    continue;
+                }
+
                 if (eventName == "trick.finish")
                 {
                     var trickNo = ReadInt(payload, "trick_no");
+                    if (trickNo <= 0)
+                        trickNo = ReadInt(payload, "trickIndex");
                     if (trickNo <= 0)
                     {
                         var trickId = ReadString(root, "trick_id");
@@ -93,11 +132,21 @@ public sealed class ReplayLogParserService
                     var frame = EnsureFrame(frames, trickNo);
                     frame.TrumpSuit ??= trumpSuit;
                     frame.WinnerIndex = ReadInt(payload, "winner_index", frame.WinnerIndex);
+                    if (frame.WinnerIndex < 0)
+                        frame.WinnerIndex = ReadInt(payload, "winner", frame.WinnerIndex);
                     frame.TrickScore = ReadInt(payload, "trick_score", frame.TrickScore);
+                    if (frame.TrickScore == 0)
+                        frame.TrickScore = ReadInt(payload, "trickScore", frame.TrickScore);
                     frame.DefenderScoreBefore = ReadInt(payload, "defender_score_before", frame.DefenderScoreBefore);
+                    if (frame.DefenderScoreBefore == 0)
+                        frame.DefenderScoreBefore = ReadInt(payload, "defenderScoreBefore", frame.DefenderScoreBefore);
                     frame.DefenderScoreAfter = ReadInt(payload, "defender_score_after", frame.DefenderScoreAfter);
+                    if (frame.DefenderScoreAfter == 0)
+                        frame.DefenderScoreAfter = ReadInt(payload, "defenderScoreAfter", frame.DefenderScoreAfter);
                     frame.WinnerReason = ParseWinnerReason(payload) ?? frame.WinnerReason;
-                    frame.Plays = ParsePlays(payload);
+                    var plays = ParsePlays(payload);
+                    if (plays.Count > 0)
+                        frame.Plays = plays;
                     frame.PlayAnalysis = ParsePlayAnalysis(payload);
                 }
             }
@@ -134,7 +183,7 @@ public sealed class ReplayLogParserService
     private static List<ReplayPlayerHand> ParseHands(JsonElement payload)
     {
         var result = new List<ReplayPlayerHand>();
-        if (!payload.TryGetProperty("hands_before_trick", out var handsElement) || handsElement.ValueKind != JsonValueKind.Array)
+        if (!TryReadArray(payload, out var handsElement, "hands_before_trick", "handsBeforeTrick"))
             return result;
 
         foreach (var hand in handsElement.EnumerateArray())
@@ -155,7 +204,7 @@ public sealed class ReplayLogParserService
     private static List<ReplayPlayerPlay> ParsePlays(JsonElement payload)
     {
         var result = new List<ReplayPlayerPlay>();
-        if (!payload.TryGetProperty("trick_cards", out var trickCards) || trickCards.ValueKind != JsonValueKind.Array)
+        if (!TryReadArray(payload, out var trickCards, "trick_cards", "plays"))
             return result;
 
         foreach (var play in trickCards.EnumerateArray())
@@ -216,6 +265,18 @@ public sealed class ReplayLogParserService
         }
 
         return cards;
+    }
+
+    private static bool TryReadArray(JsonElement element, out JsonElement array, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (element.TryGetProperty(propertyName, out array) && array.ValueKind == JsonValueKind.Array)
+                return true;
+        }
+
+        array = default;
+        return false;
     }
 
     private static string? ReadString(JsonElement element, string propName)

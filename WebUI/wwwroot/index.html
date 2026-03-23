@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>拖拉机游戏</title>
     <base href="/" />
-    <link href="css/app.css?v=20260317b" rel="stylesheet" />
-    <link href="css/game.css?v=20260317b" rel="stylesheet" />
-    <link href="WebUI.styles.css?v=20260317b" rel="stylesheet" />
+    <link href="css/app.css?v=20260321b" rel="stylesheet" />
+    <link href="css/game.css?v=20260321b" rel="stylesheet" />
+    <link href="WebUI.styles.css?v=20260321b" rel="stylesheet" />
     <style>
         body {
             margin: 0;
@@ -30,6 +30,41 @@
         <a href="" class="reload">重新加载</a>
         <a class="dismiss">🗙</a>
     </div>
+    <script>
+        window.tractorReview = (function () {
+            let dotnetRef = null;
+            let handler = null;
+
+            function registerHotkeys(ref) {
+                dotnetRef = ref;
+                if (handler) {
+                    window.removeEventListener("keydown", handler);
+                }
+
+                handler = function (event) {
+                    if (!dotnetRef) return;
+                    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                    if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
+                    dotnetRef.invokeMethodAsync("HandleReviewHotkey", event.key);
+                };
+
+                window.addEventListener("keydown", handler);
+            }
+
+            function unregisterHotkeys() {
+                if (handler) {
+                    window.removeEventListener("keydown", handler);
+                    handler = null;
+                }
+                dotnetRef = null;
+            }
+
+            return {
+                registerHotkeys: registerHotkeys,
+                unregisterHotkeys: unregisterHotkeys
+            };
+        })();
+    </script>
     <script src="js/test-hooks.js"></script>
     <script src="_framework/blazor.webassembly.js"></script>
 </body>

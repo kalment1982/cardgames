@@ -1,9 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using TractorGame.Core.GameFlow;
 using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
+using TractorGame.Core.Rules;
 using Xunit;
 
 namespace TractorGame.Tests
@@ -154,6 +156,47 @@ namespace TractorGame.Tests
             }
         }
 
+        [Fact]
+        public void PlayAndTrickLogs_ContainCardMetadataAndHandSnapshots()
+        {
+            var sink = new InMemoryLogSink();
+            var logger = new CoreLogger(sink);
+            var game = new Game(7, logger: logger);
+            game.StartGame();
+            DealToEnd(game);
+            game.FinalizeTrump(Suit.Spade);
+            game.BuryBottomEx(game.State.PlayerHands[game.State.DealerIndex].Take(8).ToList());
+
+            for (int i = 0; i < 4; i++)
+            {
+                int player = game.State.CurrentPlayer;
+                var cards = ChooseFirstLegalSingle(game, player);
+                var result = game.PlayCardsEx(player, cards);
+                Assert.True(result.Success);
+            }
+
+            var playAccept = sink.Entries.First(entry => entry.Event == "play.accept");
+            Assert.True(playAccept.Payload.ContainsKey("player_hand_before_play"));
+            Assert.True(playAccept.Payload.ContainsKey("player_hand_after_play"));
+            Assert.True(playAccept.Payload.ContainsKey("trick_cards_before_play"));
+            Assert.True(playAccept.Payload.ContainsKey("trick_cards_after_play"));
+            Assert.True(playAccept.Payload.ContainsKey("current_winner_before"));
+            Assert.True(playAccept.Payload.ContainsKey("current_winning_cards_before"));
+
+            var playCards = Assert.IsAssignableFrom<IEnumerable<object>>(playAccept.Payload["cards"]);
+            var firstCard = Assert.IsType<Dictionary<string, object?>>(playCards.Cast<object>().First());
+            Assert.True(firstCard.ContainsKey("card_instance_id"));
+            Assert.True(firstCard.ContainsKey("is_trump"));
+            Assert.True(firstCard.ContainsKey("is_level_card"));
+            Assert.True(firstCard.ContainsKey("effective_suit"));
+            Assert.True(firstCard.ContainsKey("trump_reason"));
+
+            var trickFinish = sink.Entries.Last(entry => entry.Event == "trick.finish");
+            Assert.True(trickFinish.Payload.ContainsKey("hands_after_trick"));
+            var handsAfter = Assert.IsAssignableFrom<IEnumerable<object>>(trickFinish.Payload["hands_after_trick"]);
+            Assert.Equal(4, handsAfter.Cast<object>().Count());
+        }
+
         private static void DealToEnd(Game game)
         {
             while (!game.IsDealingComplete)
@@ -161,6 +204,31 @@ namespace TractorGame.Tests
                 var step = game.DealNextCardEx();
                 Assert.True(step.Success);
             }
+        }
+
+        private static List<Card> ChooseFirstLegalSingle(Game game, int playerIndex)
+        {
+            var hand = game.State.PlayerHands[playerIndex];
+            Assert.NotEmpty(hand);
+
+            if (game.CurrentTrick.Count == 0)
+                return new List<Card> { hand[0] };
+
+            var config = new GameConfig
+            {
+                LevelRank = game.State.LevelRank,
+                TrumpSuit = game.State.TrumpSuit
+            };
+
+            var validator = new FollowValidator(config);
+            foreach (var card in hand)
+            {
+                var attempt = new List<Card> { card };
+                if (validator.IsValidFollowEx(hand, game.CurrentTrick[0].Cards, attempt).Success)
+                    return attempt;
+            }
+
+            throw new InvalidOperationException("No legal single-card follow found for test.");
         }
     }
 }

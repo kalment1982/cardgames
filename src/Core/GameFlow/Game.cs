@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using TractorGame.Core.Logging;
 using TractorGame.Core.Models;
 using TractorGame.Core.Rules;
@@ -103,7 +102,8 @@ namespace TractorGame.Core.GameFlow
                 {
                     ["seed"] = _seed,
                     ["dealer_index"] = _state.DealerIndex,
-                    ["level_rank"] = _state.LevelRank.ToString()
+                    ["level_rank"] = _state.LevelRank.ToString(),
+                    ["bid_winner_becomes_dealer"] = _bidWinnerBecomesDealer
                 });
 
             LogEvent(
@@ -193,7 +193,9 @@ namespace TractorGame.Core.GameFlow
                     new Dictionary<string, object?>
                     {
                         ["hands_count"] = _state.PlayerHands.Select(h => h.Count).ToArray(),
-                        ["bottom_count"] = _dealing.GetBottomCards().Count
+                        ["bottom_count"] = _dealing.GetBottomCards().Count,
+                        ["hands_by_player"] = SerializeHandsSnapshot(),
+                        ["bottom_cards"] = SerializeCards(_dealing.GetBottomCards())
                     });
             }
 
@@ -297,7 +299,11 @@ namespace TractorGame.Core.GameFlow
                 {
                     ["trump_suit"] = _state.TrumpSuit?.ToString() ?? "NoTrump",
                     ["trump_player"] = _bidding?.TrumpPlayer ?? _state.DealerIndex,
-                    ["is_no_trump"] = !_state.TrumpSuit.HasValue
+                    ["is_no_trump"] = !_state.TrumpSuit.HasValue,
+                    ["dealer_index"] = _state.DealerIndex,
+                    ["level_rank"] = _state.LevelRank.ToString(),
+                    ["bottom_cards"] = SerializeCards(bottom),
+                    ["dealer_hand_after_bottom"] = SerializeCards(_state.PlayerHands[_state.DealerIndex])
                 });
 
             var from = _state.Phase;
@@ -312,7 +318,9 @@ namespace TractorGame.Core.GameFlow
                 new Dictionary<string, object?>
                 {
                     ["dealer_index"] = _state.DealerIndex,
-                    ["dealer_hand_count_before_bottom"] = _state.PlayerHands[_state.DealerIndex].Count
+                    ["dealer_hand_count_before_bottom"] = _state.PlayerHands[_state.DealerIndex].Count,
+                    ["dealer_hand_before_bury"] = SerializeCards(_state.PlayerHands[_state.DealerIndex]),
+                    ["bottom_cards"] = SerializeCards(bottom)
                 });
 
             return OperationResult.Ok;
@@ -383,7 +391,9 @@ namespace TractorGame.Core.GameFlow
                 {
                     ["dealer_index"] = _state.DealerIndex,
                     ["buried_cards"] = SerializeCards(_state.BuriedCards),
-                    ["dealer_hand_count_after"] = _state.PlayerHands[_state.DealerIndex].Count
+                    ["dealer_hand_count_after"] = _state.PlayerHands[_state.DealerIndex].Count,
+                    ["dealer_hand_after"] = SerializeCards(_state.PlayerHands[_state.DealerIndex]),
+                    ["bottom_cards"] = SerializeCards(_state.BuriedCards)
                 });
 
             var from = _state.Phase;
@@ -409,6 +419,15 @@ namespace TractorGame.Core.GameFlow
             var selectedCards = cards ?? new List<Card>();
             var actor = $"player_{playerIndex}";
             var isLead = _currentTrick.Count == 0;
+            var handsBeforeTrick = isLead ? SerializeHandsSnapshot() : null;
+            var leadPlayer = isLead ? playerIndex : _trickLeader;
+            var trickBeforePlay = CloneTrickPlays(_currentTrick);
+            var playerHandBeforePlay = SerializeCards(_state.PlayerHands[playerIndex]);
+            int currentTrickScoreBefore = trickBeforePlay.Sum(play => play.Cards.Sum(card => card.Score));
+            int currentWinnerBefore = trickBeforePlay.Count > 0 ? _judge.DetermineWinner(trickBeforePlay) : -1;
+            var currentWinningCardsBefore = trickBeforePlay.Count > 0
+                ? SerializeCards((trickBeforePlay.FirstOrDefault(play => play.PlayerIndex == currentWinnerBefore)?.Cards) ?? new List<Card>())
+                : new List<Dictionary<string, object?>>();
 
             LogEvent(
                 LogCategories.Audit,
@@ -419,7 +438,15 @@ namespace TractorGame.Core.GameFlow
                 {
                     ["player_index"] = playerIndex,
                     ["cards"] = SerializeCards(selectedCards),
-                    ["is_lead"] = isLead
+                    ["is_lead"] = isLead,
+                    ["trick_no"] = _trickNo,
+                    ["play_position"] = _currentTrick.Count + 1,
+                    ["lead_player"] = leadPlayer,
+                    ["player_hand_before_play"] = playerHandBeforePlay,
+                    ["trick_cards_before_play"] = SerializePlays(trickBeforePlay),
+                    ["current_trick_score_before"] = currentTrickScoreBefore,
+                    ["current_winner_before"] = currentWinnerBefore,
+                    ["current_winning_cards_before"] = currentWinningCardsBefore
                 });
 
             if (_state.Phase != GamePhase.Playing)
@@ -542,7 +569,19 @@ namespace TractorGame.Core.GameFlow
                 {
                     ["player_index"] = playerIndex,
                     ["cards"] = SerializeCards(selectedCards),
-                    ["next_player"] = _state.CurrentPlayer
+                    ["next_player"] = _state.CurrentPlayer,
+                    ["is_lead"] = isLead,
+                    ["trick_no"] = _trickNo,
+                    ["play_position"] = _currentTrick.Count,
+                    ["lead_player"] = leadPlayer,
+                    ["hands_before_trick"] = handsBeforeTrick,
+                    ["player_hand_before_play"] = playerHandBeforePlay,
+                    ["player_hand_after_play"] = SerializeCards(_state.PlayerHands[playerIndex]),
+                    ["trick_cards_before_play"] = SerializePlays(trickBeforePlay),
+                    ["trick_cards_after_play"] = SerializePlays(_currentTrick),
+                    ["current_trick_score_before"] = currentTrickScoreBefore,
+                    ["current_winner_before"] = currentWinnerBefore,
+                    ["current_winning_cards_before"] = currentWinningCardsBefore
                 },
                 new Dictionary<string, double>
                 {
@@ -650,6 +689,7 @@ namespace TractorGame.Core.GameFlow
                     ["trick_score"] = score,
                     ["defender_score_before"] = defenderBefore,
                     ["defender_score_after"] = _state.DefenderScore,
+                    ["hands_after_trick"] = SerializeHandsSnapshot(),
                     ["winner_basis"] = BuildWinnerBasis(trickSnapshot, winner),
                     ["play_analysis"] = SerializeTrickAnalysis(trickSnapshot)
                 });
@@ -750,7 +790,11 @@ namespace TractorGame.Core.GameFlow
                 new Dictionary<string, object?>
                 {
                     ["defender_score"] = _state.DefenderScore,
-                    ["winner_side"] = winnerSide
+                    ["winner_side"] = winnerSide,
+                    ["bottom_cards"] = SerializeCards(_state.BuriedCards),
+                    ["hands_by_player"] = SerializeHandsSnapshot(),
+                    ["last_completed_trick_no"] = _lastCompletedTrickNo,
+                    ["last_completed_trick"] = SerializePlays(_lastCompletedTrick)
                 },
                 new Dictionary<string, double>
                 {
@@ -760,20 +804,30 @@ namespace TractorGame.Core.GameFlow
 
         private void LogTurnStart(int currentPlayer, bool isLead)
         {
+            int currentWinner = _currentTrick.Count > 0 ? _judge.DetermineWinner(_currentTrick) : -1;
+            var currentWinningCards = _currentTrick.Count > 0
+                ? (_currentTrick.FirstOrDefault(play => play.PlayerIndex == currentWinner)?.Cards ?? new List<Card>())
+                : new List<Card>();
+
             var payload = new Dictionary<string, object?>
             {
                 ["current_player"] = currentPlayer,
                 ["is_lead"] = isLead,
-                ["lead_player"] = _trickLeader
+                ["lead_player"] = _trickLeader,
+                ["trick_no"] = _trickNo,
+                ["dealer_index"] = _state.DealerIndex,
+                ["level_rank"] = _state.LevelRank.ToString(),
+                ["trump_suit"] = _state.TrumpSuit?.ToString() ?? Suit.Spade.ToString(),
+                ["defender_score"] = _state.DefenderScore,
+                ["play_position"] = _currentTrick.Count + 1,
+                ["current_trick"] = SerializePlays(_currentTrick),
+                ["current_trick_score"] = _currentTrick.Sum(play => play.Cards.Sum(card => card.Score)),
+                ["current_winner"] = currentWinner,
+                ["current_winning_cards"] = SerializeCards(currentWinningCards)
             };
 
             if (isLead)
             {
-                payload["trick_no"] = _trickNo;
-                payload["dealer_index"] = _state.DealerIndex;
-                payload["level_rank"] = _state.LevelRank.ToString();
-                payload["trump_suit"] = _state.TrumpSuit?.ToString() ?? Suit.Spade.ToString();
-                payload["defender_score"] = _state.DefenderScore;
                 payload["hands_before_trick"] = SerializeHandsSnapshot();
             }
 
@@ -898,19 +952,12 @@ namespace TractorGame.Core.GameFlow
             });
         }
 
-        private static List<Dictionary<string, object?>> SerializeCards(IEnumerable<Card> cards)
+        private List<Dictionary<string, object?>> SerializeCards(IEnumerable<Card> cards)
         {
-            return cards.Select(card => new Dictionary<string, object?>
-            {
-                ["card_instance_id"] = $"{card.Suit}-{card.Rank}-{RuntimeHelpers.GetHashCode(card):x}",
-                ["suit"] = card.Suit.ToString(),
-                ["rank"] = card.Rank.ToString(),
-                ["score"] = card.Score,
-                ["text"] = card.ToString()
-            }).ToList();
+            return AuditCardSerializer.SerializeCards(cards, _config);
         }
 
-        private static List<Dictionary<string, object?>> SerializePlays(IEnumerable<TrickPlay> plays)
+        private List<Dictionary<string, object?>> SerializePlays(IEnumerable<TrickPlay> plays)
         {
             return plays.Select(p => new Dictionary<string, object?>
             {

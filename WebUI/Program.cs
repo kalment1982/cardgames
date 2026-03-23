@@ -21,5 +21,6 @@ builder.Services.AddScoped<UiTelemetryService>();
 builder.Services.AddScoped<UiTestActionService>();
 builder.Services.AddScoped<TurnPlayService>();
 builder.Services.AddScoped<ReplayLogParserService>();
+builder.Services.AddScoped<ReviewApiClient>();
 
 await builder.Build().RunAsync();
